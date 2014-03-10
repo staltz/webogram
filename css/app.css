@@ -897,8 +897,7 @@ a.im_dialog:hover .im_dialog_date {
 }*/
 
 .im_message_unread_split {
-  background: #f4f4f4;
-  color: #777;
+  background: #E9EBED;
   text-align: center;
   padding: 4px 10px;
   margin: 10px 0;
@@ -1031,6 +1030,10 @@ div.im_message_video_thumb {
 .is_1x .icon-photo,
 .is_1x .icon-video {
   background-image: url(../img/icons/IconsetW_1x.png?2);
+}
+
+.im_message_self {
+  background-color: #f2f2f2;
 }
 
 .im_message_selected .icon-document,
