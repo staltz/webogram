@@ -651,7 +651,11 @@ angular.module('myApp.services', [])
   var pendingByMessageID = {};
   var pendingAfterMsgs = {};
   var tempID = -1;
+  var myUserID = -1;
 
+  MtpApiManager.getUserID().then(function (ID) {
+    myUserID = ID;
+  });
 
   var dialogsIndex = SearchIndexManager.createIndex(),
       cachedResults = {query: false};
@@ -1376,6 +1380,7 @@ angular.module('myApp.services', [])
 
     message.fromUser = AppUsersManager.getUser(message.from_id);
     message.fromPhoto = AppUsersManager.getUserPhoto(message.from_id, 'User');
+    message.fromSelf = (message.from_id === myUserID);
 
     if (message._ == 'messageForwarded') {
       message.fwdUser = AppUsersManager.getUser(message.fwd_from_id);

@@ -1032,6 +1032,10 @@ div.im_message_video_thumb {
   background-image: url(../img/icons/IconsetW_1x.png?2);
 }
 
+.im_message_self {
+  background-color: #f2f2f2;
+}
+
 .im_message_selected .icon-document,
 .im_message_selected .icon-photo,
 .im_message_selected .icon-video,
