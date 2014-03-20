@@ -1,5 +1,5 @@
 /*!
- * Webogram v0.0.19 - messaging web application for MTProto
+ * Webogram v0.0.20 - messaging web application for MTProto
  * https://github.com/zhukov/webogram
  * Copyright (C) 2014 Igor Zhukov <igor.beatle@gmail.com>
  * https://github.com/zhukov/webogram/blob/master/LICENSE
@@ -16,7 +16,7 @@ angular.module('myApp.directives', ['myApp.filters'])
       restrict: 'AE',
       scope: true,
       translude: false,
-      templateUrl: 'partials/dialog.html?5'
+      templateUrl: 'partials/dialog.html'
     };
   })
 
@@ -25,7 +25,7 @@ angular.module('myApp.directives', ['myApp.filters'])
       restrict: 'AE',
       scope: true,
       translude: false,
-      templateUrl: 'partials/message.html?7'
+      templateUrl: 'partials/message.html'
     };
   })
 
@@ -149,6 +149,7 @@ angular.module('myApp.directives', ['myApp.filters'])
 
     function link (scope, element, attrs) {
       var historyWrap = $('.im_history_wrap', element)[0],
+          historyMessagesEl = $('.im_history_messages', element)[0],
           historyEl = $('.im_history', element)[0],
           scrollableWrap = $('.im_history_scrollable_wrap', element)[0],
           scrollable = $('.im_history_scrollable', element)[0],
@@ -173,8 +174,19 @@ angular.module('myApp.directives', ['myApp.filters'])
         }, delay || 0);
       }
 
-      var animated = true,
+      var transform = false,
+          trs = ['transform', 'webkitTransform', 'MozTransform', 'msTransform', 'OTransform'],
+          i = 0;
+      for (i = 0; i < trs.length; i++) {
+        if (trs[i] in historyMessagesEl.style) {
+          transform = trs[i];
+          break;
+        }
+      }
+
+      var animated = transform ? true : false,
           curAnimation = false;
+
       scope.$on('ui_history_append', function (e, options) {
         if (!atBottom && !options.my) {
           return;
@@ -186,26 +198,29 @@ angular.module('myApp.directives', ['myApp.filters'])
           $(scrollableWrap).addClass('im_history_to_bottom');
         }
 
+        var wasH = scrollableWrap.scrollHeight;
         onContentLoaded(function () {
           if (animated) {
             curAnimation = true;
-            $(scrollableWrap).stop().animate({
-              scrollTop: scrollableWrap.scrollHeight - scrollableWrap.clientHeight
-            }, {
-              duration: 200,
-              always: function () {
-                updateScroller();
+            $(historyMessagesEl).removeClass('im_history_appending');
+            scrollableWrap.scrollTop = scrollableWrap.scrollHeight;
+            $(historyMessagesEl).css(transform, 'translate(0px, ' + (scrollableWrap.scrollHeight - wasH) + 'px)');
+            setTimeout(function () {
+              $(historyMessagesEl).addClass('im_history_appending');
+              $(historyMessagesEl).css(transform, 'translate(0px, 0px)');
+              setTimeout(function () {
                 curAnimation = false;
-              }
-            });
-            updateScroller();
+                $(historyMessagesEl).removeClass('im_history_appending');
+                updateBottomizer();
+              }, 300);
+            }, 0);
           } else {
             $(scrollableWrap).removeClass('im_history_to_bottom');
             $(scrollable).css({bottom: ''});
             scrollableWrap.scrollTop = scrollableWrap.scrollHeight;
-            $(historyWrap).nanoScroller();
+            updateBottomizer();
           }
-
+          $(historyWrap).nanoScroller();
         });
       });
 
@@ -219,7 +234,7 @@ angular.module('myApp.directives', ['myApp.filters'])
 
           var unreadSplit = $('.im_message_unread_split', scrollableWrap);
           if (unreadSplit[0]) {
-            scrollableWrap.scrollTop = unreadSplit[0].offsetTop;
+            scrollableWrap.scrollTop = Math.max(0, unreadSplit[0].offsetTop - 52);
             atBottom = false;
           } else {
             scrollableWrap.scrollTop = scrollableWrap.scrollHeight;
@@ -253,6 +268,10 @@ angular.module('myApp.directives', ['myApp.filters'])
 
           updateScroller();
           moreNotified = false;
+
+          $timeout(function () {
+            $(scrollableWrap).trigger('scroll');
+          });
         });
       });
 
@@ -260,6 +279,10 @@ angular.module('myApp.directives', ['myApp.filters'])
         onContentLoaded(function () {
           updateSizes();
           scope.$broadcast('ui_message_send');
+
+          $timeout(function () {
+            $(scrollableWrap).trigger('scroll');
+          });
         });
       });
 
@@ -302,6 +325,9 @@ angular.module('myApp.directives', ['myApp.filters'])
           minHeight: historyH - 44
         });
 
+        updateBottomizer();
+
+
         if (heightOnly == true) return;
         if (atBottom) {
           onContentLoaded(function () {
@@ -310,6 +336,14 @@ angular.module('myApp.directives', ['myApp.filters'])
           });
         }
         updateScroller(100);
+      }
+
+      function updateBottomizer () {
+        $(historyMessagesEl).css({marginTop: 0});
+        if (historyMessagesEl.offsetHeight <= scrollableWrap.offsetHeight) {
+          $(historyMessagesEl).css({marginTop: (scrollableWrap.offsetHeight - historyMessagesEl.offsetHeight - 20 - 44) + 'px'});
+        }
+        $(historyWrap).nanoScroller();
       }
 
       $($window).on('resize', updateSizes);
@@ -438,6 +472,9 @@ angular.module('myApp.directives', ['myApp.filters'])
 
       $('body').on('dragenter dragleave dragover drop', onDragDropEvent);
       $(document).on('paste', onPasteEvent);
+      if (richTextarea) {
+        $(richTextarea).on('DOMNodeInserted', onPastedImageEvent);
+      }
 
       scope.$on('ui_peer_change', focusField);
       scope.$on('ui_history_focus', focusField);
@@ -450,6 +487,9 @@ angular.module('myApp.directives', ['myApp.filters'])
       scope.$on('$destroy', function cleanup() {
         $('body').off('dragenter dragleave dragover drop', onDragDropEvent);
         $(document).off('paste', onPasteEvent);
+        if (richTextarea) {
+          $(richTextarea).off('DOMNodeInserted', onPastedImageEvent);
+        }
       });
 
       focusField();
@@ -459,6 +499,31 @@ angular.module('myApp.directives', ['myApp.filters'])
           editorElement.focus();
         });
       }
+
+      function onPastedImageEvent (e) {
+        var element = e && e.target;
+        var src;
+        if (element && (src = element.src) && src.indexOf('data') === 0) {
+          element.parentNode.removeChild(element);
+          src = src.substr(5).split(';');
+          var contentType = src[0];
+          var base64 = atob(src[1].split(',')[1]);
+          var array = new Uint8Array(base64.length);
+
+          for (var i = 0; i < base64.length; i++) {
+            array[i] = base64.charCodeAt(i);
+          }
+
+          var blob = new Blob([array], {type: contentType});
+
+          if (safeConfirm('Are you sure to send file(s) from clipboard?')) {
+            scope.$apply(function () {
+              scope.draftMessage.files = [blob];
+              scope.draftMessage.isMedia = true;
+            });
+          }
+        }
+      };
 
       function onPasteEvent (e) {
         var cData = (e.originalEvent || e).clipboardData,

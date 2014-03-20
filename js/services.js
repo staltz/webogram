@@ -1,5 +1,5 @@
 /*!
- * Webogram v0.0.19 - messaging web application for MTProto
+ * Webogram v0.0.20 - messaging web application for MTProto
  * https://github.com/zhukov/webogram
  * Copyright (C) 2014 Igor Zhukov <igor.beatle@gmail.com>
  * https://github.com/zhukov/webogram/blob/master/LICENSE
@@ -290,7 +290,7 @@ angular.module('myApp.services', [])
     scope.userID = userID;
 
     var modalInstance = $modal.open({
-      templateUrl: 'partials/user_modal.html?2',
+      templateUrl: 'partials/user_modal.html',
       controller: 'UserModalController',
       scope: scope,
       windowClass: 'user_modal_window'
@@ -444,7 +444,7 @@ angular.module('myApp.services', [])
     scope.chatID = chatID;
 
     var modalInstance = $modal.open({
-      templateUrl: 'partials/chat_modal.html?4',
+      templateUrl: 'partials/chat_modal.html',
       controller: 'ChatModalController',
       windowClass: 'chat_modal_window',
       scope: scope
@@ -694,19 +694,18 @@ angular.module('myApp.services', [])
       }
     }
 
-    if (curDialogStorage.count !== null && (
-          curDialogStorage.dialogs.length >= offset + limit ||
-          curDialogStorage.dialogs.length == curDialogStorage.count
-        )) {
+    if (curDialogStorage.count !== null && curDialogStorage.dialogs.length == curDialogStorage.count ||
+        curDialogStorage.dialogs.length >= offset + (limit || 1)
+    ) {
       return $q.when({
         count: curDialogStorage.count,
-        dialogs: curDialogStorage.dialogs.slice(offset, offset + limit)
+        dialogs: curDialogStorage.dialogs.slice(offset, offset + (limit || 20))
       });
     }
 
-    var deferred = $q.defer();
+    limit = limit || 20;
 
-    MtpApiManager.invokeApi('messages.getDialogs', {
+    return MtpApiManager.invokeApi('messages.getDialogs', {
       offset: offset,
       limit: limit,
       max_id: maxID || 0
@@ -739,17 +738,17 @@ angular.module('myApp.services', [])
           top_message: dialog.top_message,
           unread_count: dialog.unread_count
         });
+
+        if (historiesStorage[peerID] === undefined) {
+          historiesStorage[peerID] = {count: null, history: [dialog.top_message], pending: []}
+        }
       });
 
-      deferred.resolve({
+      return {
         count: curDialogStorage.count,
         dialogs: curDialogStorage.dialogs.slice(offset, offset + limit)
-      });
-    }, function (error) {
-      deferred.reject(error);
+      };
     });
-
-    return deferred.promise;
   }
 
   function fillHistoryStorage (inputPeer, maxID, fullLimit, historyStorage) {
@@ -809,13 +808,10 @@ angular.module('myApp.services', [])
     var unreadLimit = false;
     if (!limit && !maxID) {
       var foundDialog = getDialogByPeerID(peerID);
-      if (foundDialog && foundDialog[0] && foundDialog[0].unread_count > 0) {
-        unreadLimit = foundDialog[0].unread_count;
-        limit = Math.max(20, unreadLimit + 2);
+      if (foundDialog && foundDialog[0] && foundDialog[0].unread_count > 1) {
+        unreadLimit = Math.min(1000, foundDialog[0].unread_count);
+        limit = unreadLimit;
       }
-    }
-    if (!limit) {
-      limit = 20;
     }
 
     if (maxID > 0) {
@@ -826,16 +822,21 @@ angular.module('myApp.services', [])
       }
     }
 
-    if (historyStorage.count !== null && (
-      historyStorage.history.length >= offset + limit ||
-      historyStorage.history.length == historyStorage.count
-    )) {
+    if (historyStorage.count !== null && historyStorage.history.length == historyStorage.count ||
+      historyStorage.history.length >= offset + (limit || 1)
+    ) {
       return $q.when({
         count: historyStorage.count,
-        history: resultPending.concat(historyStorage.history.slice(offset, offset + limit)),
+        history: resultPending.concat(historyStorage.history.slice(offset, offset + (limit || 20))),
         unreadLimit: unreadLimit
       });
     }
+
+    if (unreadLimit) {
+      limit = Math.max(20, unreadLimit + 2);
+    }
+
+    limit = limit || 20;
 
     return fillHistoryStorage(inputPeer, maxID, limit, historyStorage).then(function () {
       offset = 0;
@@ -862,7 +863,7 @@ angular.module('myApp.services', [])
       filter: inputFilter || {_: 'inputMessagesFilterEmpty'},
       min_date: 0,
       max_date: 0,
-      limit: limit,
+      limit: limit || 20,
       max_id: maxID || 0
     }).then(function (searchResult) {
       AppUsersManager.saveApiUsers(searchResult.users);
@@ -924,26 +925,25 @@ angular.module('myApp.services', [])
         historyStorage = historiesStorage[peerID],
         foundDialog = getDialogByPeerID(peerID);
 
-    if (!historyStorage ||
-        !historyStorage.history.length ||
-        foundDialog[0] && !foundDialog[0].unread_count) {
-      // console.log('bad1', historyStorage, foundDialog[0]);
-      return false;
-    }
+    if (!foundDialog[0] || !foundDialog[0].unread_count) {
 
-    var messageID,
-        message;
-    // console.log(historyStorage);
-    for (i = 0; i < historyStorage.history.length; i++) {
-      messageID = historyStorage.history[i];
-      message = messagesStorage[messageID];
-      // console.log('ms', message);
-      if (message && !message.out) {
-        if (message.unread) {
-          // console.log('unread');
+      if (!historyStorage || !historyStorage.history.length) {
+        return false;
+      }
+
+      var messageID,
+          message,
+          foundUnread = false;
+      for (i = historyStorage.history.length; i >= 0; i--) {
+        messageID = historyStorage.history[i];
+        message = messagesStorage[messageID];
+        // console.log('ms', message);
+        if (message && !message.out && message.unread) {
+          foundUnread = true;
           break;
         }
-        // console.log('bad2', message);
+      }
+      if (!foundUnread) {
         return false;
       }
     }
@@ -963,17 +963,19 @@ angular.module('myApp.services', [])
     });
 
 
-    var messageID, message, i, peerID, foundDialog, dialog;
-    for (i = 0; i < historyStorage.history.length; i++) {
-      messageID = historyStorage.history[i];
-      message = messagesStorage[messageID];
-      if (message && !message.out) {
-        message.unread = false;
-        if (messagesForHistory[messageID]) {
-          messagesForHistory[messageID].unread = false;
-        }
-        if (messagesForDialogs[messageID]) {
-          messagesForDialogs[messageID].unread = false;
+    if (historyStorage && historyStorage.history.length) {
+      var messageID, message, i, peerID, foundDialog, dialog;
+      for (i = 0; i < historyStorage.history.length; i++) {
+        messageID = historyStorage.history[i];
+        message = messagesStorage[messageID];
+        if (message && !message.out) {
+          message.unread = false;
+          if (messagesForHistory[messageID]) {
+            messagesForHistory[messageID].unread = false;
+          }
+          if (messagesForDialogs[messageID]) {
+            messagesForDialogs[messageID].unread = false;
+          }
         }
       }
     }
@@ -1123,8 +1125,8 @@ angular.module('myApp.services', [])
         attachType, fileName, fileName;
 
     if (!options.isMedia) {
-      attachType = 'doc';
-      fileName = 'doc.' + file.type.split('/')[1];
+      attachType = 'document';
+      fileName = 'document.' + file.type.split('/')[1];
     } else if (['image/jpeg', 'image/gif', 'image/png', 'image/bmp'].indexOf(file.type) >= 0) {
       attachType = 'photo';
       fileName = 'photo.' + file.type.split('/')[1];
@@ -1135,8 +1137,8 @@ angular.module('myApp.services', [])
       attachType = 'audio';
       fileName = 'audio.mp3';
     } else {
-      attachType = 'doc';
-      fileName = 'doc.' + file.type.split('/')[1];
+      attachType = 'document';
+      fileName = 'document.' + file.type.split('/')[1];
     }
 
     if (!file.name) {
@@ -1201,7 +1203,7 @@ angular.module('myApp.services', [])
               inputMedia = {_: 'inputMediaUploadedAudio', file: inputFile, duration: 0};
               break;
 
-            case 'doc':
+            case 'document':
             default:
               inputMedia = {_: 'inputMediaUploadedDocument', file: inputFile, file_name: file.name, mime_type: file.type};
           }
@@ -1496,7 +1498,7 @@ angular.module('myApp.services', [])
     notification.image = notificationPhoto.placeholder;
     notification.key = 'msg' + message.id;
 
-    if (notificationPhoto.location) {
+    if (notificationPhoto.location && !notificationPhoto.location.empty) {
       MtpApiFileManager.downloadSmallFile(notificationPhoto.location, notificationPhoto.size).then(function (url) {
         notification.image = url;
 
@@ -1797,7 +1799,7 @@ angular.module('myApp.services', [])
     scope.photoID = photoID;
 
     var modalInstance = $modal.open({
-      templateUrl: 'partials/photo_modal.html?1',
+      templateUrl: 'partials/photo_modal.html',
       controller: 'PhotoModalController',
       scope: scope
     });
@@ -1897,7 +1899,7 @@ angular.module('myApp.services', [])
     scope.player = {};
 
     var modalInstance = $modal.open({
-      templateUrl: 'partials/video_modal.html?1',
+      templateUrl: 'partials/video_modal.html',
       controller: 'VideoModalController',
       scope: scope
     });
@@ -1940,7 +1942,7 @@ angular.module('myApp.services', [])
         height = 100,
         thumbPhotoSize = doc.thumb,
         thumb = {
-          placeholder: 'img/placeholders/DocThumbConversation.jpg',
+          // placeholder: 'img/placeholders/DocThumbConversation.jpg',
           width: width,
           height: height
         };
@@ -1957,13 +1959,15 @@ angular.module('myApp.services', [])
     } else {
       thumb = false;
     }
-
     doc.thumb = thumb;
+
+    doc.canDownload = !(window.chrome && chrome.fileSystem && chrome.fileSystem.chooseEntry);
+    doc.withPreview = doc.canDownload && doc.mime_type.match(/^(image\/|application\/pdf)/);
 
     return docsForHistory[docID] = doc;
   }
 
-  function openDoc (docID, accessHash) {
+  function openDoc (docID, accessHash, popup) {
     var doc = docs[docID],
         historyDoc = docsForHistory[docID] || doc || {},
         inputFileLocation = {
@@ -2004,6 +2008,11 @@ angular.module('myApp.services', [])
     } else {
       MtpApiFileManager.downloadFile(doc.dc_id, inputFileLocation, doc.size, null, {mime: doc.mime_type}).then(function (url) {
         delete historyDoc.progress;
+
+        if (popup) {
+          window.open(url, '_blank');
+          return
+        }
 
         var a = $('<a>Download</a>').css({position: 'absolute', top: 1, left: 1}).attr('href', url).attr('target', '_blank').attr('download', doc.file_name).appendTo('body');
         a[0].dataset.downloadurl = ['png', doc.file_name, url].join(':');
@@ -2095,18 +2104,10 @@ angular.module('myApp.services', [])
       return urlPromises[url];
     }
 
-    var deferred = $q.defer();
-
-    $http.get(url, {responseType: 'blob', transformRequest: null})
-      .then(
-        function (response) {
-          deferred.resolve(window.webkitURL.createObjectURL(response.data));
-        }, function (error) {
-          deferred.reject(error);
-        }
-      );
-
-    return urlPromises[url] = deferred.promise;
+    return urlPromises[url] = $http.get(url, {responseType: 'blob', transformRequest: null})
+      .then(function (response) {
+        return window.webkitURL.createObjectURL(response.data);
+      });
   }
 
   return {
@@ -2362,6 +2363,7 @@ angular.module('myApp.services', [])
         return { category: cat, row: row, column: column };
       }
     }
+    console.error('emoji not found in spritesheet', emojiCode);
     return null;
   }
 
@@ -2418,10 +2420,11 @@ angular.module('myApp.services', [])
       }
       else if (match[6]) {
 
-        if (emojiCode = emojiMap[match[6]]) {
-          emojiFound = true;
+        if ((emojiCode = emojiMap[match[6]]) &&
+            (emojiCoords = getEmojiSpritesheetCoords(emojiCode))) {
+
           emojiTitle = encodeEntities(emojiData[emojiCode][1][0]);
-          emojiCoords = getEmojiSpritesheetCoords(emojiCode);
+          emojiFound = true;
           html.push(
             '<span class="emoji emoji-',
             emojiCoords.category,
