@@ -1,4 +1,4 @@
-<div ng-include="'partials/head.html?3'"></div>
+<div ng-include="'partials/head.html'"></div>
 
 <div class="im_page_wrap" ng-class="{im_page_peer_not_selected: !curDialog.peer}">
 
@@ -87,7 +87,10 @@
               <div class="im_history_scrollable">
 
                   <div class="im_history" ng-class="{im_history_selectable: selectActions}">
-                    <div class="im_history_message_wrap" my-message ng-repeat="historyMessage in history"></div>
+                    <div class="im_history_empty" ng-show="historyEmpty &amp;&amp; !history.length">No messages to display</div>
+                    <div class="im_history_messages">
+                      <div class="im_history_message_wrap" my-message ng-repeat="historyMessage in history"></div>
+                    </div>
                   </div>
 
                   <div class="im_history_typing_wrap">
@@ -106,8 +109,11 @@
 
             <div class="im_edit_panel_wrap clearfix" ng-show="selectActions" ng-class="{im_edit_panel_wrap_loaded: true}">
               <div class="im_edit_panel_border"></div>
-              <a class="im_edit_flush_link" ng-click="selectedFlush()">
+              <a class="im_edit_flush_link" ng-click="selectedFlush()" ng-show="historyPeer.id < 0">
                 Clear History
+              </a>
+              <a class="im_edit_flush_link" ng-click="selectedFlush()" ng-show="historyPeer.id > 0">
+                Delete Chat
               </a>
               <a class="im_edit_cancel_link" ng-click="selectedCancel()">
                 Cancel
@@ -146,7 +152,7 @@
                     <textarea ng-model="draftMessage.text" placeholder="Write a message..." class="form-control im_message_field"></textarea>
 
                     <div class="im_media_attach pull-right">
-                      <input type="file" class="im_media_attach_input" size="28" multiple="true" accept="image/x-png, image/png, image/gif, image/jpeg, video/*, audio/mpeg, audio/mp3" />
+                      <input type="file" class="im_media_attach_input" size="28" multiple="true" accept="image/*, video/*, audio/*" />
                       <i class="icon icon-camera"></i>
                     </div>
 
