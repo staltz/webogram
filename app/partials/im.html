@@ -5,9 +5,23 @@
   <div class="im_page_split clearfix">
 
     <div class="im_dialogs_col_wrap" ng-controller="AppImDialogsController">
-      <div class="im_dialogs_search">
-        <input class="form-control im_dialogs_search_field" type="search" placeholder="Search" ng-model="search.query"/>
-        <a class="im_dialogs_search_clear" ng-click="search.query = ''" ng-show="search.query.length"></a>
+      <div class="im_dialogs_panel">
+        <div class="dropdown im_dialogs_panel_dropdown pull-right">
+          <a class="dropdown-toggle">
+            <span class="icon-bar"></span>
+            <span class="icon-bar"></span>
+            <span class="icon-bar"></span>
+          </a>
+          <ul class="dropdown-menu">
+            <li><a href="" ng-click="openGroup()">New Group</a></li>
+            <li><a href="" ng-click="openContacts()">Contacts</a></li>
+            <li><a href="" ng-click="openSettings()">Settings</a></li>
+          </ul>
+        </div>
+        <div class="im_dialogs_search">
+          <input class="form-control im_dialogs_search_field" type="search" placeholder="Search" ng-model="search.query"/>
+          <a class="im_dialogs_search_clear" ng-click="search.query = ''" ng-show="search.query.length"></a>
+        </div>
       </div>
       <div my-dialogs-list class="im_dialogs_col">
         <div class="im_dialogs_wrap nano">
@@ -15,6 +29,30 @@
             <ul class="nav nav-pills nav-stacked">
               <li class="im_dialog_wrap" my-dialog dialog-message="dialogMessage" ng-repeat="dialogMessage in dialogs track by dialogMessage.peerID" ng-class="{active: curDialog.peerID == dialogMessage.peerID}"></li>
             </ul>
+            <div class="im_dialogs_contacts_wrap" ng-show="contacts.length > 0">
+              <h5>Contacts</h5>
+              <ul class="nav nav-pills nav-stacked">
+                <li class="im_dialog_wrap" ng-repeat="contact in contacts | orderBy:'user.sortName' track by contact.userID" ng-class="{active: curDialog.peerID == contact.userID}">
+                  <a class="im_dialog" ng-click="dialogSelect(contact.peerString)">
+                    <div class="im_dialog_photo pull-left">
+                      <img
+                        class="im_dialog_photo"
+                        my-load-thumb
+                        thumb="contact.userPhoto"
+                      />
+                    </div>
+                    <div class="im_dialog_message_wrap">
+                      <div class="im_dialog_peer">
+                        <span class="im_dialog_user" ng-bind-html="contact.user.rFullName"></span>
+                      </div>
+                      <div class="im_dialog_message">
+                        <span class="im_dialog_message_text">{{contact.user | userStatus}}</span>
+                      </div>
+                    </div>
+                  </a>
+                </li>
+              </ul>
+            </div>
           </div>
         </div>
       </div>
@@ -94,7 +132,7 @@
                   </div>
 
                   <div class="im_history_typing_wrap">
-                    <div class="im_history_typing" ng-show="typing.user">
+                    <div class="im_history_typing" ng-show="typing.user &amp;&amp; !mediaType">
                       <strong class="im_history_typing_author" ng-bind-html="typing.user.rFullName"></strong> is typing<span my-typing-dots></span>
                     </div>
                   </div>
@@ -151,22 +189,24 @@
                     <div class="im_send_dropbox_wrap"> Drop photos here to send </div>
                     <textarea ng-model="draftMessage.text" placeholder="Write a message..." class="form-control im_message_field"></textarea>
 
-                    <div class="im_media_attach pull-right">
-                      <input type="file" class="im_media_attach_input" size="28" multiple="true" accept="image/*, video/*, audio/*" />
-                      <i class="icon icon-camera"></i>
+                    <div class="" style="position: relative;">
+                      <div class="im_media_attach pull-right" tooltip="Send media" tooltip-append-to-body="true" tooltip-popup-delay="1000">
+                        <input type="file" class="im_media_attach_input" size="28" multiple="true" accept="image/*, video/*, audio/*" />
+                        <i class="icon icon-camera"></i>
+                      </div>
+
+                      <div class="im_attach pull-right" tooltip="Send file" tooltip-append-to-body="true" tooltip-popup-delay="1000">
+                        <input type="file" class="im_attach_input" size="28" multiple="true" />
+                        <i class="icon icon-paperclip"></i>
+                      </div>
+
+
+                      <div class="im_emoji_btn pull-right">
+                        <i class="icon icon-emoji"></i>
+                      </div>
+
+                      <button type="submit" class="btn btn-success im_submit">Send</button>
                     </div>
-
-                    <div class="im_attach pull-right">
-                      <input type="file" class="im_attach_input" size="28" multiple="true" />
-                      <i class="icon icon-paperclip"></i>
-                    </div>
-
-
-                    <div class="im_emoji_btn pull-right">
-                      <i class="icon icon-emoji"></i>
-                    </div>
-
-                    <button type="submit" class="btn btn-success im_submit">Send</button>
                   </form>
                 </div>
 

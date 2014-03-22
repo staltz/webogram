@@ -219,11 +219,14 @@ angular.module('myApp.controllers', [])
     // console.log('init controller');
 
     $scope.dialogs = [];
+    $scope.contacts = [];
     $scope.search = {};
 
     var offset = 0,
         maxID = 0,
-        hasMore = false;
+        hasMore = false,
+        peersInDialogs = {},
+        contactsShown;
 
     MtpApiManager.invokeApi('account.updateStatus', {offline: false});
     $scope.$on('dialogs_need_more', function () {
@@ -275,9 +278,15 @@ angular.module('myApp.controllers', [])
       offset = 0;
       maxID = 0;
       hasMore = false;
+      peersInDialogs = {};
+      contactsShown = false;
 
       AppMessagesManager.getDialogs($scope.search.query, maxID).then(function (dialogsResult) {
         $scope.dialogs = [];
+
+        if (!$scope.search.query) {
+          $scope.contacts = [];
+        }
 
         if (dialogsResult.dialogs.length) {
           offset += dialogsResult.dialogs.length;
@@ -286,6 +295,7 @@ angular.module('myApp.controllers', [])
           hasMore = dialogsResult.count === null || offset < dialogsResult.count;
 
           angular.forEach(dialogsResult.dialogs, function (dialog) {
+            peersInDialogs[dialog.peerID] = true;
             $scope.dialogs.push(AppMessagesManager.wrapForDialog(dialog.top_message, dialog.unread_count));
           });
         }
@@ -306,7 +316,27 @@ angular.module('myApp.controllers', [])
     }
 
     function showMoreDialogs () {
-      if (!hasMore || !offset) {
+      if (!hasMore && contactsShown || !offset) {
+        return;
+      }
+
+      if (!hasMore) {
+        contactsShown = true;
+
+        AppUsersManager.getContacts($scope.search.query).then(function (contactsList) {
+          $scope.contacts = [];
+          angular.forEach(contactsList, function(userID) {
+            if (peersInDialogs[userID] === undefined) {
+              $scope.contacts.push({
+                userID: userID,
+                user: AppUsersManager.getUser(userID),
+                userPhoto: AppUsersManager.getUserPhoto(userID, 'User'),
+                peerString: AppUsersManager.getUserString(userID)
+              });
+            }
+          });
+        });
+        $scope.$broadcast('ui_dialogs_append');
         return;
       }
 
@@ -316,6 +346,7 @@ angular.module('myApp.controllers', [])
         hasMore = dialogsResult.count === null || offset < dialogsResult.count;
 
         angular.forEach(dialogsResult.dialogs, function (dialog) {
+          peersInDialogs[dialog.peerID] = true;
           $scope.dialogs.push(AppMessagesManager.wrapForDialog(dialog.top_message, dialog.unread_count));
         });
 
@@ -413,7 +444,7 @@ angular.module('myApp.controllers', [])
       if (!hasMore || !offset) {
         return;
       }
-      console.trace('load history');
+      // console.trace('load history');
 
       var inputMediaFilter = $scope.mediaType && {_: inputMediaFilters[$scope.mediaType]},
           getMessagesPromise = inputMediaFilter
@@ -592,7 +623,11 @@ angular.module('myApp.controllers', [])
     $scope.$on('history_append', function (e, addedMessage) {
       if (addedMessage.peerID == $scope.curDialog.peerID) {
         if ($scope.mediaType) {
-          $scope.missedCount++;
+          if (addedMessage.my) {
+            toggleMedia();
+          } else {
+            $scope.missedCount++;
+          }
           return;
         }
         // console.log('append', addedMessage);
@@ -631,6 +666,12 @@ angular.module('myApp.controllers', [])
     $scope.$on('dialog_flush', function (e, dialog) {
       if (dialog.peerID == $scope.curDialog.peerID) {
         $scope.history = [];
+      }
+    });
+
+    $scope.$on('history_focus', function (e, peerData) {
+      if ($scope.mediaType) {
+        toggleMedia();
       }
     });
 
@@ -773,7 +814,6 @@ angular.module('myApp.controllers', [])
         $scope.$broadcast('ui_message_send');
       }
     }
-
   })
 
   .controller('PhotoModalController', function ($scope, AppPhotosManager) {

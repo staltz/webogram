@@ -60,6 +60,10 @@ angular.module('myApp.directives', ['myApp.filters'])
         onContentLoaded(function () {
           updateScroller();
           moreNotified = false;
+
+          $timeout(function () {
+            $(scrollableWrap).trigger('scroll');
+          });
         });
       });
 
@@ -67,6 +71,10 @@ angular.module('myApp.directives', ['myApp.filters'])
         onContentLoaded(function () {
           updateScroller();
           moreNotified = false;
+
+          $timeout(function () {
+            $(scrollableWrap).trigger('scroll');
+          });
         });
       });
 
@@ -176,7 +184,7 @@ angular.module('myApp.directives', ['myApp.filters'])
 
       var transform = false,
           trs = ['transform', 'webkitTransform', 'MozTransform', 'msTransform', 'OTransform'],
-          i = 0;
+          i;
       for (i = 0; i < trs.length; i++) {
         if (trs[i] in historyMessagesEl.style) {
           transform = trs[i];
@@ -242,6 +250,10 @@ angular.module('myApp.directives', ['myApp.filters'])
 
           updateScroller();
           moreNotified = false;
+
+          $timeout(function () {
+            $(scrollableWrap).trigger('scroll');
+          });
         });
       });
 
@@ -266,7 +278,7 @@ angular.module('myApp.directives', ['myApp.filters'])
           $(scrollable).css({bottom: ''});
           scrollableWrap.scrollTop = st + scrollableWrap.scrollHeight - sh;
 
-          updateScroller();
+          updateBottomizer();
           moreNotified = false;
 
           $timeout(function () {
@@ -921,4 +933,19 @@ angular.module('myApp.directives', ['myApp.filters'])
         });
       });
     };
+  })
+
+
+  .directive('myModalWidth', function () {
+
+    return {
+      link: link
+    };
+
+    function link(scope, element, attrs) {
+      attrs.$observe('myModalWidth', function (newW) {
+        $(element[0].parentNode.parentNode).css({width: parseInt(newW) + 36});
+      });
+    };
+
   });

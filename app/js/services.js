@@ -1416,6 +1416,9 @@ angular.module('myApp.services', [])
       if (message.action._ == 'messageActionChatEditPhoto') {
         message.action.photo = AppPhotosManager.wrapForHistory(message.action.photo.id);
       }
+      if (message.action._ == 'messageActionChatEditTitle') {
+        message.action.rTitle = RichTextProcessor.wrapRichText(message.action.title, {noLinks: true, noLinebreaks: true}) || 'DELETED';
+      }
 
       if (message.action.user_id) {
         message.action.user = AppUsersManager.getUser(message.action.user_id);
@@ -1764,24 +1767,35 @@ angular.module('myApp.services', [])
 
   function wrapForFull (photoID) {
     var photo = wrapForHistory(photoID),
-        fullWidth = Math.min($(window).width() - 60, 542),
+        fullWidth = $(window).width() - 36,
         fullHeight = $($window).height() - 150,
         fullPhotoSize = choosePhotoSize(photo, fullWidth, fullHeight),
         full = {
-          placeholder: 'img/placeholders/PhotoThumbModal.gif',
-          width: fullWidth,
-          height: fullHeight
+          placeholder: 'img/placeholders/PhotoThumbModal.gif'
         };
 
+    if (fullWidth > 800) {
+      fullWidth -= 200;
+    }
+
+    full.width = fullWidth;
+    full.height = fullHeight;
+
     if (fullPhotoSize && fullPhotoSize._ != 'photoSizeEmpty') {
-      if (fullPhotoSize.w > fullPhotoSize.h) {
+      if ((fullPhotoSize.w / fullPhotoSize.h) > (fullWidth / fullHeight)) {
         full.height = parseInt(fullPhotoSize.h * fullWidth / fullPhotoSize.w);
-      } else {
+      }
+      else {
         full.width = parseInt(fullPhotoSize.w * fullHeight / fullPhotoSize.h);
         if (full.width > fullWidth) {
           full.height = parseInt(full.height * fullWidth / full.width);
           full.width = fullWidth;
         }
+      }
+
+      if (full.width >= fullPhotoSize.w && full.height >= fullPhotoSize.h) {
+        full.width = fullPhotoSize.w;
+        full.height = fullPhotoSize.h;
       }
 
       full.location = fullPhotoSize.location;
@@ -1801,7 +1815,8 @@ angular.module('myApp.services', [])
     var modalInstance = $modal.open({
       templateUrl: 'partials/photo_modal.html',
       controller: 'PhotoModalController',
-      scope: scope
+      scope: scope,
+      windowClass: 'photo_modal_window'
     });
   }
 
@@ -1817,8 +1832,9 @@ angular.module('myApp.services', [])
 })
 
 
-.service('AppVideoManager', function ($rootScope, $modal, $window, MtpApiFileManager, AppUsersManager) {
+.service('AppVideoManager', function ($rootScope, $modal, $window, $timeout, MtpApiFileManager, AppUsersManager) {
   var videos = {};
+  var videosForHistory = {};
 
   function saveVideo (apiVideo) {
     videos[apiVideo.id] = apiVideo;
@@ -1834,6 +1850,10 @@ angular.module('myApp.services', [])
   };
 
   function wrapForHistory (videoID) {
+    if (videosForHistory[videoID] !== undefined) {
+      return videosForHistory[videoID];
+    }
+
     var video = angular.copy(videos[videoID]),
         width = 200,
         height = 200,
@@ -1857,7 +1877,7 @@ angular.module('myApp.services', [])
 
     video.thumb = thumb;
 
-    return video;
+    return videosForHistory[videoID] = video;
   }
 
   function wrapForFull (videoID) {
@@ -1905,7 +1925,76 @@ angular.module('myApp.services', [])
     });
   }
 
+  function downloadVideo (videoID, accessHash, popup) {
+    var video = videos[videoID],
+        historyVideo = videosForHistory[videoID] || video || {},
+        inputFileLocation = {
+          _: 'inputVideoFileLocation',
+          id: videoID,
+          access_hash: accessHash || video.access_hash
+        };
+
+    historyVideo.progress = {enabled: true, percent: 1, total: video.size};
+
+    function updateDownloadProgress (progress) {
+      console.log('dl progress', progress);
+      historyVideo.progress.done = progress.done;
+      historyVideo.progress.percent = Math.max(1, Math.floor(100 * progress.done / progress.total));
+      $rootScope.$broadcast('history_update');
+    }
+
+    var ext = 'mp4',
+        mimeType = 'video/mpeg4',
+        fileName = 'video' + videoID + '.' + ext;
+
+    if (window.chrome && chrome.fileSystem && chrome.fileSystem.chooseEntry) {
+
+      chrome.fileSystem.chooseEntry({
+        type: 'saveFile',
+        suggestedName: fileName,
+        accepts: [{
+          mimeTypes: [mimeType],
+          extensions: [ext]
+        }]
+      }, function (writableFileEntry) {
+        MtpApiFileManager.downloadFile(video.dc_id, inputFileLocation, video.size, writableFileEntry, {mime: mimeType}).then(function (url) {
+          delete historyVideo.progress;
+          console.log('file save done');
+        }, function (e) {
+          console.log('video download failed', e);
+          historyVideo.progress.enabled = false;
+        }, updateDownloadProgress);
+      });
+    } else {
+      MtpApiFileManager.downloadFile(video.dc_id, inputFileLocation, video.size, null, {mime: mimeType}).then(function (url) {
+        delete historyVideo.progress;
+
+        if (popup) {
+          window.open(url, '_blank');
+          return
+        }
+
+        var a = $('<a>Download</a>')
+                  .css({position: 'absolute', top: 1, left: 1})
+                  .attr('href', url)
+                  .attr('target', '_blank')
+                  .attr('download', fileName)
+                  .appendTo('body');
+
+        a[0].dataset.downloadurl = [mimeType, fileName, url].join(':');
+        a[0].click();
+        $timeout(function () {
+          a.remove();
+        }, 100);
+      }, function (e) {
+        console.log('video download failed', e);
+        historyVideo.progress.enabled = false;
+      }, updateDownloadProgress);
+    }
+  };
+
   $rootScope.openVideo = openVideo;
+  $rootScope.downloadVideo = downloadVideo;
 
   return {
     saveVideo: saveVideo,
@@ -1967,7 +2056,7 @@ angular.module('myApp.services', [])
     return docsForHistory[docID] = doc;
   }
 
-  function openDoc (docID, accessHash, popup) {
+  function downloadDoc (docID, accessHash, popup) {
     var doc = docs[docID],
         historyDoc = docsForHistory[docID] || doc || {},
         inputFileLocation = {
@@ -2014,8 +2103,14 @@ angular.module('myApp.services', [])
           return
         }
 
-        var a = $('<a>Download</a>').css({position: 'absolute', top: 1, left: 1}).attr('href', url).attr('target', '_blank').attr('download', doc.file_name).appendTo('body');
-        a[0].dataset.downloadurl = ['png', doc.file_name, url].join(':');
+        var a = $('<a>Download</a>')
+                  .css({position: 'absolute', top: 1, left: 1})
+                  .attr('href', url)
+                  .attr('target', '_blank')
+                  .attr('download', doc.file_name)
+                  .appendTo('body');
+
+        a[0].dataset.downloadurl = [doc.mime_type, doc.file_name, url].join(':');
         a[0].click();
         $timeout(function () {
           a.remove();
@@ -2027,12 +2122,12 @@ angular.module('myApp.services', [])
     }
   }
 
-  $rootScope.openDoc = openDoc;
+  $rootScope.downloadDoc = downloadDoc;
 
   return {
     saveDoc: saveDoc,
     wrapForHistory: wrapForHistory,
-    openDoc: openDoc
+    downloadDoc: downloadDoc
   }
 })
 
