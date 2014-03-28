@@ -28,7 +28,7 @@ angular.module('myApp.controllers', [])
         return;
       }
     });
-    var options = {dcID: 1};
+    var options = {dcID: 1, createNetworker: true};
 
     $scope.credentials = {};
     $scope.progress = {};
@@ -69,7 +69,10 @@ angular.module('myApp.controllers', [])
       }, options).then(function (result) {
         $scope.progress.enabled = false;
         if (!result.phone_registered) {
-          ErrorService.showSimpleError('No account', 'Sorry, there is no Telegram account for ' + $scope.credentials.phone_number + '. Please sign up using our mobile apps.');
+          ErrorService.show({
+            error: {code: 400, type: 'ACCOUNT_REQUIRED'},
+            phone: $scope.credentials.phone_number
+          });
           return false;
         }
 
@@ -86,7 +89,7 @@ angular.module('myApp.controllers', [])
           $scope.credentials.phone_occupied = sentCode.phone_registered;
           $scope.error = {};
 
-          $scope.callPending.remaining = 60;
+          $scope.callPending.remaining = sentCode.send_call_timeout;
           callCheck();
 
         }, function (error) {
@@ -106,7 +109,7 @@ angular.module('myApp.controllers', [])
             break;
 
           default:
-            ErrorService.showSimpleError('Unknown error occured', 'Please check your internet connection or install the latest version of Google Chrome browser.');
+            ErrorService.alert('Unknown error occured', 'Please check your internet connection or install the latest version of Google Chrome browser.');
         }
       });
     }
@@ -365,7 +368,6 @@ angular.module('myApp.controllers', [])
     StatusManager.start();
 
     $scope.history = [];
-    $scope.historyEmpty = false;
     $scope.mediaType = false;
     $scope.selectedMsgs = {};
     $scope.selectedCount = 0;
@@ -439,18 +441,47 @@ angular.module('myApp.controllers', [])
       }
     }
 
+    function updateHistoryGroups (limit) {
+      var start = 0,
+          end = $scope.history.length,
+          i, curMessage, prevMessage;
+
+      if (limit > 0) {
+        end = limit;
+      } else if (limit < 0) {
+        start = end + limit;
+      }
+
+      for (i = start; i < end; i++) {
+        curMessage = $scope.history[i];
+        // if (prevMessage) console.log(dT(), curMessage.from_id == prevMessage.from_id, curMessage.date - prevMessage.date);
+        if (prevMessage &&
+            curMessage.from_id == prevMessage.from_id &&
+            curMessage.date < prevMessage.date + 30 &&
+            curMessage.message && curMessage.message.length < 30) {
+          curMessage.grouped = true;
+        } else if (!start) {
+          delete curMessage.grouped;
+        }
+        prevMessage = curMessage;
+      }
+    }
+
     function showMoreHistory () {
       if (!hasMore || !offset) {
         return;
       }
       // console.trace('load history');
 
-      var inputMediaFilter = $scope.mediaType && {_: inputMediaFilters[$scope.mediaType]},
+      var curJump = jump,
+          inputMediaFilter = $scope.mediaType && {_: inputMediaFilters[$scope.mediaType]},
           getMessagesPromise = inputMediaFilter
         ? AppMessagesManager.getSearch($scope.curDialog.inputPeer, '', inputMediaFilter, maxID)
         : AppMessagesManager.getHistory($scope.curDialog.inputPeer, maxID);
 
       getMessagesPromise.then(function (historyResult) {
+        if (curJump != jump) return;
+
         offset += historyResult.history.length;
         hasMore = historyResult.count === null || offset < historyResult.count;
         maxID = historyResult.history[historyResult.history.length - 1];
@@ -459,9 +490,9 @@ angular.module('myApp.controllers', [])
           $scope.history.unshift(AppMessagesManager.wrapForHistory(id));
         });
 
+        updateHistoryGroups(historyResult.history.length);
+
         $scope.$broadcast('ui_history_prepend');
-      }, function () {
-        safeReplaceObject($scope.state, {error: true});
       });
     }
 
@@ -476,13 +507,14 @@ angular.module('myApp.controllers', [])
         ? AppMessagesManager.getSearch($scope.curDialog.inputPeer, '', inputMediaFilter, maxID)
         : AppMessagesManager.getHistory($scope.curDialog.inputPeer, maxID);
 
-      $scope.historyEmpty = false;
 
+      safeReplaceObject($scope.state, {loaded: false});
       getMessagesPromise.then(function (historyResult) {
+        safeReplaceObject($scope.state, {loaded: true});
+
         if (curJump != jump) return;
 
         offset += historyResult.history.length;
-        $scope.historyEmpty = !historyResult.count;
 
         hasMore = historyResult.count === null || offset < historyResult.count;
         maxID = historyResult.history[historyResult.history.length - 1];
@@ -493,6 +525,8 @@ angular.module('myApp.controllers', [])
         });
         $scope.history.reverse();
 
+        updateHistoryGroups();
+
         if (historyResult.unreadLimit) {
           $scope.historyUnread = {
             beforeID: historyResult.history[historyResult.unreadLimit - 1],
@@ -501,8 +535,6 @@ angular.module('myApp.controllers', [])
         } else {
           $scope.historyUnread = {};
         }
-
-        safeReplaceObject($scope.state, {loaded: true});
 
         $scope.$broadcast('ui_history_change');
 
@@ -634,6 +666,7 @@ angular.module('myApp.controllers', [])
         // console.log('append', addedMessage);
         // console.trace();
         $scope.history.push(AppMessagesManager.wrapForHistory(addedMessage.messageID));
+        updateHistoryGroups(-3);
         $scope.typing = {};
         $scope.$broadcast('ui_history_append', {my: addedMessage.my});
         if (addedMessage.my) {
@@ -1051,7 +1084,7 @@ angular.module('myApp.controllers', [])
         }, function (error) {
           switch (error.code) {
             case 400:
-              ErrorService.showSimpleError('Bad photo', 'The photo is invalid, please select another file.');
+              ErrorService.alert('Bad photo', 'The photo is invalid, please select another file.');
               break;
           }
         });
@@ -1129,12 +1162,6 @@ angular.module('myApp.controllers', [])
             });
             $scope.profile.photo = AppUsersManager.getUserPhoto(id, 'User');
           });
-        }, function (error) {
-          switch (error.code) {
-            case 400:
-              ErrorService.showSimpleError('Bad photo', 'The photo is invalid, please select another file.');
-              break;
-          }
         });
       })['finally'](function () {
         $scope.photo.updating = false;

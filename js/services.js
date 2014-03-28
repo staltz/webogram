@@ -671,7 +671,7 @@ angular.module('myApp.services', [])
   }
 })
 
-.service('AppMessagesManager', function ($q, $rootScope, $location, ApiUpdatesManager, AppUsersManager, AppChatsManager, AppPeersManager, AppPhotosManager, AppVideoManager, AppDocsManager, AppAudioManager, MtpApiManager, MtpApiFileManager, RichTextProcessor, NotificationsManager, SearchIndexManager) {
+.service('AppMessagesManager', function ($q, $rootScope, $location, $filter, ApiUpdatesManager, AppUsersManager, AppChatsManager, AppPeersManager, AppPhotosManager, AppVideoManager, AppDocsManager, AppAudioManager, MtpApiManager, MtpApiFileManager, RichTextProcessor, NotificationsManager, SearchIndexManager) {
 
   var messagesStorage = {};
   var messagesForHistory = {};
@@ -1485,6 +1485,8 @@ angular.module('myApp.services', [])
     if (message.message && message.message.length) {
       message.richMessage = RichTextProcessor.wrapRichText(message.message.substr(0, 64), {noLinks: true, noLinebreaks: true});
     }
+
+    message.dateText = $filter('dateOrTime')(message.date);
 
 
     return messagesForDialogs[msgID] = message;
@@ -2319,7 +2321,8 @@ angular.module('myApp.services', [])
 
     return urlPromises[url] = $http.get(url, {responseType: 'blob', transformRequest: null})
       .then(function (response) {
-        return window.webkitURL.createObjectURL(response.data);
+        window.URL = window.URL || window.webkitURL;
+        return window.URL.createObjectURL(response.data);
       });
   }
 
@@ -2967,30 +2970,28 @@ angular.module('myApp.services', [])
 
 .service('ErrorService', function ($rootScope, $modal) {
 
-  function showError (templateUrl, params, options) {
+  function show (params, options) {
+    options = options || {};
     var scope = $rootScope.$new();
     angular.extend(scope, params);
 
     return $modal.open({
-      templateUrl: templateUrl,
-      // controller: 'ErrorModalController',
+      templateUrl: 'partials/error_modal.html',
       scope: scope,
-      windowClass: options.windowClass || ''
+      windowClass: options.windowClass || 'error_modal_window'
     });
   }
 
-  function showSimpleError (title, description) {
-    return showError ('partials/error_modal.html', {
+  function alert (title, description) {
+    return show ({
       title: title,
       description: description
-    }, {
-      windowClass: 'error_modal_window'
     });
   };
 
   return {
-    showError: showError,
-    showSimpleError: showSimpleError
+    show: show,
+    alert: alert
   }
 })
 
