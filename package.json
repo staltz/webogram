@@ -2,7 +2,22 @@
   "name": "webogram",
   "version": "0.0.21",
   "description": "Telegram UNOFFICIAL Web App",
-  "main": "index.html",
+  "main": "app/index.html",
+  "single-instance": true,
+  "dom_storage_quota": 40,
+  "window": {
+    "title": "Webogram",
+    "icon": "app/img/icons/icon128.png",
+    "toolbar": false,
+    "frame": true,
+    "position": "center",
+    "resizable": true,
+    "width": 800,
+    "min_width": 675,
+    "height": 650,
+    "min_height": 650,
+    "show": true
+  },
   "scripts": {
     "start": "node server.js"
   },
@@ -32,6 +47,7 @@
     "gulp-grep-stream": "0.0.2",
     "event-stream": "^3.1.0",
     "gulp-zip": "^0.1.2",
-    "gulp-manifest": "0.0.3"
+    "gulp-manifest": "0.0.3",
+    "gulp-ngmin": "~0.1.2"
   }
 }

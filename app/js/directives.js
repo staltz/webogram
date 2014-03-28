@@ -318,6 +318,9 @@ angular.module('myApp.directives', ['myApp.filters'])
       });
 
       function updateSizes (heightOnly) {
+        if (!element.is(':visible') || !$(element[0].parentNode).is(':visible')) {
+          return;
+        }
         if ($(sendFormWrap).is(':visible')) {
           $(sendFormWrap).css({
             height: $(sendForm).height()
@@ -353,7 +356,7 @@ angular.module('myApp.directives', ['myApp.filters'])
 
       function updateBottomizer () {
         $(historyMessagesEl).css({marginTop: 0});
-        if (historyMessagesEl.offsetHeight <= scrollableWrap.offsetHeight) {
+        if (historyMessagesEl.offsetHeight > 0 && historyMessagesEl.offsetHeight <= scrollableWrap.offsetHeight) {
           $(historyMessagesEl).css({marginTop: (scrollableWrap.offsetHeight - historyMessagesEl.offsetHeight - 20 - 44) + 'px'});
         }
         $(historyWrap).nanoScroller();
@@ -851,7 +854,7 @@ angular.module('myApp.directives', ['myApp.filters'])
   })
 
 
-  .directive('myTypingDots', function($interval) {
+  .directive('myLoadingDots', function($interval) {
 
     return {
       link: link,
@@ -984,4 +987,34 @@ angular.module('myApp.directives', ['myApp.filters'])
 
     };
 
-  });
+  })
+
+
+  .directive('myVerticalPosition', function ($window, $timeout) {
+
+    return {
+      link: link
+    };
+
+    function link($scope, element, attrs) {
+
+      var updateMargin = function () {
+        var height = element[0].offsetHeight,
+            contHeight = $($window).height(),
+            ratio = attrs.myVerticalPosition && parseFloat(attrs.myVerticalPosition) || 0.5,
+            margin = height < contHeight ? parseInt((contHeight - height) * ratio) : '';
+
+        element.css({marginTop: margin, marginBottom: margin});
+      };
+
+      onContentLoaded(updateMargin);
+
+      $($window).on('resize', updateMargin);
+
+      $scope.$on('ui_height', function () {
+        onContentLoaded(updateMargin);
+      });
+
+    };
+
+  })
