@@ -318,7 +318,7 @@ angular.module('myApp.services', [])
     });
     return MtpApiManager.invokeApi('contacts.deleteContacts', {
       id: ids
-    }, function () {
+    }).then(function () {
       angular.forEach(userIDs, function (userID) {
         onContactUpdated(userID, false);
       });
@@ -783,6 +783,7 @@ angular.module('myApp.services', [])
   }
 
   function fillHistoryStorage (inputPeer, maxID, fullLimit, historyStorage) {
+    console.log('fill history storage', inputPeer, maxID, fullLimit, angular.copy(historyStorage));
     return MtpApiManager.invokeApi('messages.getHistory', {
       peer: inputPeer,
       offset: 0,
@@ -929,8 +930,6 @@ angular.module('myApp.services', [])
 
       return deletedMessageIDs;
     });
-
-
   }
 
   function processAffectedHistory (inputPeer, affectedHistory, method) {
@@ -1219,7 +1218,11 @@ angular.module('myApp.services', [])
       }
 
       message.send = function () {
-        MtpApiFileManager.uploadFile(file).then(function (inputFile) {
+        var uploaded = false,
+            uploadPromise = MtpApiFileManager.uploadFile(file);
+
+        uploadPromise.then(function (inputFile) {
+          uploaded = true;
           var inputMedia;
           switch (attachType) {
             case 'photo':
@@ -1268,17 +1271,17 @@ angular.module('myApp.services', [])
           toggleError(true);
         }, function (progress) {
           // console.log('upload progress', progress);
-          var historyMessage = messagesForHistory[messageID],
-              percent = Math.max(1, Math.floor(100 * progress.done / progress.total));
-
           media.progress.done = progress.done;
-          media.progress.percent = percent;
-          if (historyMessage) {
-            historyMessage.media.progress.done = progress.done;
-            historyMessage.media.progress.percent = percent;
-            $rootScope.$broadcast('history_update', {peerID: peerID});
-          }
+          media.progress.percent = Math.max(1, Math.floor(100 * progress.done / progress.total));
+          $rootScope.$broadcast('history_update', {peerID: peerID});
         });
+
+        media.progress.cancel = function () {
+          if (!uploaded) {
+            uploadPromise.cancel();
+            cancelPendingMessage(randomIDS);
+          }
+        }
       };
 
       saveMessages([message]);
@@ -1306,7 +1309,7 @@ angular.module('myApp.services', [])
       var media;
       switch (inputMedia._) {
         case 'inputMediaContact':
-          media = angular.extend({}, inputMedia, {_: 'messageMediaContact', user_id: 0});
+          media = angular.extend({}, inputMedia, {_: 'messageMediaContact'});
           break;
       }
 
@@ -1399,6 +1402,39 @@ angular.module('myApp.services', [])
 
     });
   };
+
+  function cancelPendingMessage (randomID) {
+    var pendingData = pendingByRandomID[randomID];
+
+    console.log('pending', randomID, pendingData);
+
+    if (pendingData) {
+      var peerID = pendingData[0],
+          tempID = pendingData[1],
+          historyStorage = historiesStorage[peerID],
+          i;
+
+      ApiUpdatesManager.saveUpdate({
+        _: 'updateDeleteMessages',
+        messages: [tempID]
+      });
+
+      for (i = 0; i < historyStorage.pending.length; i++) {
+        if (historyStorage.pending[i] == tempID) {
+          historyStorage.pending.splice(i, 1);
+          break;
+        }
+      }
+
+      delete messagesForHistory[tempID];
+      delete messagesStorage[tempID];
+
+
+      return true;
+    }
+
+    return false;
+  }
 
   function finalizePendingMessage(randomID, finalMessage) {
     var pendingData = pendingByRandomID[randomID];
@@ -1499,6 +1535,10 @@ angular.module('myApp.services', [])
 
     var message = angular.copy(messagesStorage[msgID]) || {id: msgID};
 
+    if (message.media && message.media.progress !== undefined) {
+      message.media.progress = messagesStorage[msgID].media.progress;
+    }
+
     message.fromUser = AppUsersManager.getUser(message.from_id);
     message.fromPhoto = AppUsersManager.getUserPhoto(message.from_id, 'User');
     message.fromSelf = (message.from_id === myUserID);
@@ -1524,6 +1564,13 @@ angular.module('myApp.services', [])
         case 'messageMediaAudio':
           message.media.audio = AppAudioManager.wrapForHistory(message.media.audio.id);
           break;
+
+        case 'messageMediaContact':
+          message.media.rFullName = RichTextProcessor.wrapRichText(
+            message.media.first_name + ' ' + (message.media.last_name || ''),
+            {noLinks: true, noLinebreaks: true}
+          );
+          break;
       }
 
       if (message.media.user_id) {
@@ -1532,11 +1579,15 @@ angular.module('myApp.services', [])
       }
     }
     else if (message.action) {
-      if (message.action._ == 'messageActionChatEditPhoto') {
-        message.action.photo = AppPhotosManager.wrapForHistory(message.action.photo.id);
-      }
-      if (message.action._ == 'messageActionChatEditTitle') {
-        message.action.rTitle = RichTextProcessor.wrapRichText(message.action.title, {noLinks: true, noLinebreaks: true}) || 'DELETED';
+      switch (message.action._) {
+        case 'messageActionChatEditPhoto':
+          message.action.photo = AppPhotosManager.wrapForHistory(message.action.photo.id);
+          break;
+
+        case 'messageActionChatCreate':
+        case 'messageActionChatEditTitle':
+          message.action.rTitle = RichTextProcessor.wrapRichText(message.action.title, {noLinks: true, noLinebreaks: true}) || 'DELETED';
+          break;
       }
 
       if (message.action.user_id) {
@@ -1788,13 +1839,22 @@ angular.module('myApp.services', [])
 
           var historyStorage = historiesStorage[peerID];
           if (historyStorage !== undefined) {
-            var newHistory = [];
+            var newHistory = [],
+                newPending = [];
             for (var i = 0; i < historyStorage.history.length; i++) {
               if (!updatedData.msgs[historyStorage.history[i]]) {
                 newHistory.push(historyStorage.history[i]);
               }
             }
             historyStorage.history = newHistory;
+
+            for (var i = 0; i < historyStorage.pending.length; i++) {
+              if (!updatedData.msgs[historyStorage.pending[i]]) {
+                newPending.push(historyStorage.pending[i]);
+              }
+            }
+            historyStorage.pending = newPending;
+
             $rootScope.$broadcast('history_delete', {peerID: peerID, msgs: updatedData.msgs});
           }
         });
@@ -1885,6 +1945,31 @@ angular.module('myApp.services', [])
     return photo;
   }
 
+  function preloadPhoto (photoID) {
+    if (!photos[photoID]) {
+      return;
+    }
+    var photo = photos[photoID],
+        fullWidth = $(window).width() - 36,
+        fullHeight = $($window).height() - 150,
+        fullPhotoSize = choosePhotoSize(photo, fullWidth, fullHeight);
+
+    if (fullPhotoSize && !fullPhotoSize.preloaded) {
+      fullPhotoSize.preloaded = true;
+      if (fullPhotoSize.size) {
+        MtpApiFileManager.downloadFile(fullPhotoSize.location.dc_id, {
+          _: 'inputFileLocation',
+          volume_id: fullPhotoSize.location.volume_id,
+          local_id: fullPhotoSize.location.local_id,
+          secret: fullPhotoSize.location.secret
+        }, fullPhotoSize.size);
+      } else {
+        MtpApiFileManager.downloadSmallFile(fullPhotoSize.location);
+      }
+    }
+  };
+  $rootScope.preloadPhoto = preloadPhoto;
+
   function wrapForFull (photoID) {
     var photo = wrapForHistory(photoID),
         fullWidth = $(window).width() - 36,
@@ -1945,6 +2030,7 @@ angular.module('myApp.services', [])
 
   return {
     savePhoto: savePhoto,
+    preloadPhoto: preloadPhoto,
     wrapForHistory: wrapForHistory,
     wrapForFull: wrapForFull,
     openPhoto: openPhoto
@@ -2027,6 +2113,9 @@ angular.module('myApp.services', [])
     // console.log(222, video.w, video.h, full.width, full.height);
 
     video.full = full;
+    video.fullThumb = angular.copy(video.thumb);
+    video.fullThumb.width = full.width;
+    video.fullThumb.height = full.height;
     video.fromUser = AppUsersManager.getUser(video.user_id);
 
     return video;
@@ -2077,16 +2166,21 @@ angular.module('myApp.services', [])
           extensions: [ext]
         }]
       }, function (writableFileEntry) {
-        MtpApiFileManager.downloadFile(video.dc_id, inputFileLocation, video.size, writableFileEntry, {mime: mimeType}).then(function (url) {
+        var downloadPromise = MtpApiFileManager.downloadFile(video.dc_id, inputFileLocation, video.size, writableFileEntry, {mime: mimeType});
+        downloadPromise.then(function (url) {
           delete historyVideo.progress;
           console.log('file save done');
         }, function (e) {
           console.log('video download failed', e);
           historyVideo.progress.enabled = false;
         }, updateDownloadProgress);
+
+        historyVideo.progress.cancel = downloadPromise.cancel;
       });
     } else {
-      MtpApiFileManager.downloadFile(video.dc_id, inputFileLocation, video.size, null, {mime: mimeType}).then(function (url) {
+      var downloadPromise = MtpApiFileManager.downloadFile(video.dc_id, inputFileLocation, video.size, null, {mime: mimeType});
+
+      downloadPromise.then(function (url) {
         delete historyVideo.progress;
 
         if (popup) {
@@ -2110,6 +2204,8 @@ angular.module('myApp.services', [])
         console.log('video download failed', e);
         historyVideo.progress.enabled = false;
       }, updateDownloadProgress);
+
+      historyVideo.progress.cancel = downloadPromise.cancel;
     }
   };
 
@@ -2206,16 +2302,22 @@ angular.module('myApp.services', [])
           extensions: [ext]
         }]
       }, function (writableFileEntry) {
-        MtpApiFileManager.downloadFile(doc.dc_id, inputFileLocation, doc.size, writableFileEntry, {mime: doc.mime_type}).then(function (url) {
+        var downloadPromise = MtpApiFileManager.downloadFile(doc.dc_id, inputFileLocation, doc.size, writableFileEntry, {mime: doc.mime_type});
+
+        downloadPromise.then(function (url) {
           delete historyDoc.progress;
           console.log('file save done');
         }, function (e) {
           console.log('document download failed', e);
           historyDoc.progress.enabled = false;
         }, updateDownloadProgress);
+
+        historyDoc.progress.cancel = downloadPromise.cancel;
       });
     } else {
-      MtpApiFileManager.downloadFile(doc.dc_id, inputFileLocation, doc.size, null, {mime: doc.mime_type}).then(function (url) {
+      var downloadPromise = MtpApiFileManager.downloadFile(doc.dc_id, inputFileLocation, doc.size, null, {mime: doc.mime_type});
+
+      downloadPromise.then(function (url) {
         delete historyDoc.progress;
 
         if (popup) {
@@ -2239,6 +2341,8 @@ angular.module('myApp.services', [])
         console.log('document download failed', e);
         historyDoc.progress.enabled = false;
       }, updateDownloadProgress);
+
+      historyDoc.progress.cancel = downloadPromise.cancel;
     }
   }
 
@@ -2287,7 +2391,9 @@ angular.module('myApp.services', [])
       $rootScope.$broadcast('history_update');
     }
 
-    MtpApiFileManager.downloadFile(audio.dc_id, inputFileLocation, audio.size, null, {mime: 'audio/mpeg'}).then(function (url) {
+    var downloadPromise = MtpApiFileManager.downloadFile(audio.dc_id, inputFileLocation, audio.size, null, {mime: 'audio/mpeg'});
+
+    downloadPromise.then(function (url) {
       delete historyAudio.progress;
       historyAudio.url = $sce.trustAsResourceUrl(url);
       historyAudio.autoplay = true;
@@ -2297,9 +2403,11 @@ angular.module('myApp.services', [])
         $rootScope.$broadcast('history_update');
       }, 1000);
     }, function (e) {
-      console.log('document download failed', e);
-      historyDoc.progress.enabled = false;
+      console.log('audio download failed', e);
+      historyAudio.progress.enabled = false;
     }, updateDownloadProgress);
+
+    historyAudio.progress.cancel = downloadPromise.cancel;
   }
 
   $rootScope.openAudio = openAudio;
@@ -2762,7 +2870,7 @@ angular.module('myApp.services', [])
     lastOnlineUpdated = offline ? 0 : date;
     return MtpApiManager.invokeApi('account.updateStatus', {
       offline: offline
-    });
+    }, {noErrorBox: true});
   }
 
   function checkIDLE() {
@@ -2970,16 +3078,30 @@ angular.module('myApp.services', [])
 
 .service('ErrorService', function ($rootScope, $modal) {
 
+  var shownBoxes = 0;
+
   function show (params, options) {
+    if (shownBoxes >= 2) {
+      console.log('Skip error box, too many open', shownBoxes, params, options);
+      return false;
+    }
+
     options = options || {};
     var scope = $rootScope.$new();
     angular.extend(scope, params);
 
-    return $modal.open({
+    shownBoxes++;
+    var modal = $modal.open({
       templateUrl: 'partials/error_modal.html',
       scope: scope,
       windowClass: options.windowClass || 'error_modal_window'
     });
+
+    modal.result['finally'](function () {
+      shownBoxes--;
+    });
+
+    return modal;
   }
 
   function alert (title, description) {
