@@ -149,7 +149,7 @@ angular.module('myApp.directives', ['myApp.filters'])
 
   })
 
-  .directive('myHistory', function ($window, $timeout) {
+  .directive('myHistory', function ($window, $timeout, $transition) {
 
     return {
       link: link
@@ -199,9 +199,7 @@ angular.module('myApp.directives', ['myApp.filters'])
         if (!atBottom && !options.my) {
           return;
         }
-        if (animated) {
-          $(scrollableWrap).stop();
-        } else {
+        if (!animated) {
           $(scrollable).css({bottom: 0});
           $(scrollableWrap).addClass('im_history_to_bottom');
         }
@@ -213,22 +211,22 @@ angular.module('myApp.directives', ['myApp.filters'])
             $(historyMessagesEl).removeClass('im_history_appending');
             scrollableWrap.scrollTop = scrollableWrap.scrollHeight;
             $(historyMessagesEl).css(transform, 'translate(0px, ' + (scrollableWrap.scrollHeight - wasH) + 'px)');
-            setTimeout(function () {
-              $(historyMessagesEl).addClass('im_history_appending');
-              $(historyMessagesEl).css(transform, 'translate(0px, 0px)');
-              setTimeout(function () {
-                curAnimation = false;
-                $(historyMessagesEl).removeClass('im_history_appending');
-                updateBottomizer();
-              }, 300);
-            }, 0);
+            $(historyWrap).nanoScroller();
+            var styles = {};
+            styles[transform] = 'translate(0px, 0px)';
+            $(historyMessagesEl).addClass('im_history_appending');
+            $transition($(historyMessagesEl), styles).then(function () {
+              curAnimation = false;
+              $(historyMessagesEl).removeClass('im_history_appending');
+              updateBottomizer();
+            });
           } else {
             $(scrollableWrap).removeClass('im_history_to_bottom');
             $(scrollable).css({bottom: ''});
             scrollableWrap.scrollTop = scrollableWrap.scrollHeight;
             updateBottomizer();
+            $(historyWrap).nanoScroller();
           }
-          $(historyWrap).nanoScroller();
         });
       });
 
@@ -624,18 +622,28 @@ angular.module('myApp.directives', ['myApp.filters'])
       if (cachedSrc) {
         element.attr('src', cachedSrc);
       }
+      if ($scope.thumb && $scope.thumb.width && $scope.thumb.height) {
+        element.attr('width', $scope.thumb.width);
+        element.attr('height', $scope.thumb.height);
+      }
 
-      $scope.$watchCollection('thumb.location', function (newLocation) {
+      var stopWatching = $scope.$watchCollection('thumb.location', function (newLocation) {
+        if ($scope.thumb && $scope.thumb.width && $scope.thumb.height) {
+          element.attr('width', $scope.thumb.width);
+          element.attr('height', $scope.thumb.height);
+        }
         // console.log('new loc', newLocation, arguments);
         var counterSaved = ++counter;
         if (!newLocation || newLocation.empty) {
           element.attr('src', $scope.thumb && $scope.thumb.placeholder || 'img/blank.gif');
+          cleanup();
           return;
         }
 
         var cachedSrc = MtpApiFileManager.getCachedFile(newLocation);
         if (cachedSrc) {
           element.attr('src', cachedSrc);
+          cleanup();
           return;
         }
 
@@ -643,18 +651,27 @@ angular.module('myApp.directives', ['myApp.filters'])
           element.attr('src', $scope.thumb.placeholder || 'img/blank.gif');
         }
 
-        MtpApiFileManager.downloadSmallFile($scope.thumb.location, $scope.thumb.size).then(function (url) {
+        MtpApiFileManager.downloadSmallFile($scope.thumb.location).then(function (url) {
           if (counterSaved == counter) {
             element.attr('src', url);
+            cleanup();
           }
         }, function (e) {
-          console.log('Download image failed', e, $scope.thumb.location);
+          console.log('Download image failed', e, $scope.thumb.location, element[0]);
           if (counterSaved == counter) {
             element.attr('src', $scope.thumb.placeholder || 'img/blank.gif');
+            cleanup();
           }
         });
       })
 
+      var cleanup = angular.noop;
+      // function () {
+      //   setTimeout(function () {
+      //     $scope.$destroy()
+      //     stopWatching();
+      //   }, 0);
+      // };
     }
 
   })
@@ -763,9 +780,7 @@ angular.module('myApp.directives', ['myApp.filters'])
             <img\
               class="img_fullsize"\
               my-load-thumb\
-              thumb="video.thumb"\
-              width="{{video.full.width}}"\
-              height="{{video.full.height}}"\
+              thumb="video.fullThumb"\
             />\
           </div>\
           <div class="video_full_player" ng-if="player.src">\
@@ -776,7 +791,7 @@ angular.module('myApp.directives', ['myApp.filters'])
           </div>\
           <div class="video_full_error_wrap" ng-if="error">\
             <div class="video_full_error" ng-if="error.html" ng-bind-html="error.html"></div>\
-            <div class="video_full_error" ng-if="error.text">{{error.text}}</div>\
+            <div class="video_full_error" ng-if="error.text" ng-bind="error.text"></div>\
           </div>\
         </div>',
       scope: {
@@ -804,7 +819,9 @@ angular.module('myApp.directives', ['myApp.filters'])
         }
       }
 
-      MtpApiFileManager.downloadFile($scope.video.dc_id, inputLocation, $scope.video.size, null, {mime: 'video/mp4'}).then(function (url) {
+      var downloadPromise = MtpApiFileManager.downloadFile($scope.video.dc_id, inputLocation, $scope.video.size, null, {mime: 'video/mp4'});
+
+      downloadPromise.then(function (url) {
         $scope.progress.enabled = false;
         // $scope.progress = {enabled: true, percent: 50};
         $scope.player.hasQuicktime = hasQt;
@@ -823,6 +840,10 @@ angular.module('myApp.directives', ['myApp.filters'])
 
       }, function (progress) {
         $scope.progress.percent = Math.max(1, Math.floor(100 * progress.done / progress.total));
+      });
+
+      $scope.$on('$destroy', function () {
+        downloadPromise.cancel();
       });
     }
 
@@ -860,30 +881,29 @@ angular.module('myApp.directives', ['myApp.filters'])
       link: link,
     };
 
-    var interval;
-
     function link ($scope, element, attrs) {
-      var promise = $interval(function () {
-        var time = tsNow(),
-            cnt = 3;
+      element.html(isAnimationSupported(element[0])
+        ? '<div class="loading_dots"><span></span><span></span><span></span></div>'
+        : '...'
+      );
+    }
 
-        if (time % 1000 <= 200) {
-          cnt = 0;
-        } else if (time % 1000 <= 400) {
-          cnt = 1;
-        } else if (time % 1000 <= 600) {
-          cnt = 2;
+    var animationSupported;
+    function isAnimationSupported (el) {
+      if (animationSupported === undefined) {
+        animationSupported = el.style.animationName !== undefined;
+        if (animationSupported === false) {
+          var domPrefixes = 'Webkit Moz O ms Khtml'.split(' '), i;
+          for (i = 0; i < domPrefixes.length; i++) {
+            if (el.style[domPrefixes[i] + 'AnimationName'] !== undefined) {
+              animationSupported = true;
+              break;
+            }
+          }
         }
+      }
 
-        var text = '...',
-            html = text.substr(0, cnt + 1) + (cnt < 2 ? ('<span class="text-invisible">' + text.substr(cnt + 1) + '</span>') : '');
-
-        element.html(html);
-      }, 200);
-
-      $scope.$on('$destroy', function cleanup() {
-        $interval.cancel(promise);
-      });
+      return animationSupported;
     }
   })
 
