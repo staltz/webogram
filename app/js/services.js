@@ -681,6 +681,7 @@ angular.module('myApp.services', [])
   var pendingByRandomID = {};
   var pendingByMessageID = {};
   var pendingAfterMsgs = {};
+  var sendFilePromise = $q.when();
   var tempID = -1;
   var myUserID = -1;
 
@@ -773,6 +774,8 @@ angular.module('myApp.services', [])
         if (historiesStorage[peerID] === undefined) {
           historiesStorage[peerID] = {count: null, history: [dialog.top_message], pending: []}
         }
+
+        NotificationsManager.savePeerSettings(peerID, dialog.notify_settings);
       });
 
       return {
@@ -889,6 +892,54 @@ angular.module('myApp.services', [])
   }
 
   function getSearch (inputPeer, query, inputFilter, maxID, limit) {
+    var foundMsgs = [];
+
+    if (!maxID && !query) {
+      var peerID = AppPeersManager.getPeerID(inputPeer),
+          historyStorage = historiesStorage[peerID];
+
+      if (historyStorage !== undefined && historyStorage.history.length) {
+        var neededContents = {},
+            neededLimit = limit || 20,
+            i, message;
+
+        switch (inputFilter._) {
+          case 'inputMessagesFilterPhotos':
+            neededContents['messageMediaPhoto'] = true;
+            break;
+
+          case 'inputMessagesFilterVideo':
+            neededContents['messageMediaVideo'] = true;
+            break;
+
+          case 'inputMessagesFilterPhotoVideo':
+            neededContents['messageMediaPhoto'] = true;
+            neededContents['messageMediaVideo'] = true;
+            break;
+
+          case 'inputMessagesFilterDocument':
+            neededContents['messageMediaDocument'] = true;
+            break;
+        }
+        for (i = 0; i < historyStorage.history.length; i++) {
+          message = messagesStorage[historyStorage.history[i]];
+          if (message.media && neededContents[message.media._]) {
+            foundMsgs.push(message.id);
+            if (foundMsgs.length >= neededLimit) {
+              break;
+            }
+          }
+        }
+      }
+    }
+
+    if (foundMsgs.length || limit == 1000) {
+      return $q.when({
+        count: null,
+        history: foundMsgs
+      });
+    }
+
     return MtpApiManager.invokeApi('messages.search', {
       peer: inputPeer,
       q: query || '',
@@ -906,7 +957,7 @@ angular.module('myApp.services', [])
         ? searchResult.count
         : searchResult.messages.length;
 
-      var foundMsgs = [];
+      foundMsgs = [];
       angular.forEach(searchResult.messages, function (message) {
         foundMsgs.push(message.id);
       });
@@ -916,6 +967,10 @@ angular.module('myApp.services', [])
         history: foundMsgs
       };
     });
+  }
+
+  function getMessage (messageID) {
+    return messagesStorage[messageID] || {deleted: true};
   }
 
   function deleteMessages (messageIDs) {
@@ -1157,7 +1212,7 @@ angular.module('myApp.services', [])
     if (!options.isMedia) {
       attachType = 'document';
       fileName = 'document.' + file.type.split('/')[1];
-    } else if (['image/jpeg', 'image/gif', 'image/png', 'image/bmp'].indexOf(file.type) >= 0) {
+    } else if (['image/jpeg', 'image/png', 'image/bmp'].indexOf(file.type) >= 0) {
       attachType = 'photo';
       fileName = 'photo.' + file.type.split('/')[1];
     } else if (file.type.substr(0, 6) == 'video/') {
@@ -1218,70 +1273,81 @@ angular.module('myApp.services', [])
       }
 
       message.send = function () {
-        var uploaded = false,
-            uploadPromise = MtpApiFileManager.uploadFile(file);
+        var sendFileDeferred = $q.defer();
 
-        uploadPromise.then(function (inputFile) {
-          uploaded = true;
-          var inputMedia;
-          switch (attachType) {
-            case 'photo':
-              inputMedia = {_: 'inputMediaUploadedPhoto', file: inputFile};
-              break;
+        sendFilePromise.then(function () {
+          var uploaded = false,
+              uploadPromise = MtpApiFileManager.uploadFile(file);
 
-            case 'video':
-              inputMedia = {_: 'inputMediaUploadedVideo', file: inputFile, duration: 0, w: 0, h: 0};
-              break;
+          uploadPromise.then(function (inputFile) {
+            uploaded = true;
+            var inputMedia;
+            switch (attachType) {
+              case 'photo':
+                inputMedia = {_: 'inputMediaUploadedPhoto', file: inputFile};
+                break;
 
-            case 'audio':
-              inputMedia = {_: 'inputMediaUploadedAudio', file: inputFile, duration: 0};
-              break;
+              case 'video':
+                inputMedia = {_: 'inputMediaUploadedVideo', file: inputFile, duration: 0, w: 0, h: 0};
+                break;
 
-            case 'document':
-            default:
-              inputMedia = {_: 'inputMediaUploadedDocument', file: inputFile, file_name: file.name, mime_type: file.type};
-          }
-          MtpApiManager.invokeApi('messages.sendMedia', {
-            peer: inputPeer,
-            media: inputMedia,
-            random_id: randomID
-          }).then(function (result) {
-            if (ApiUpdatesManager.saveSeq(result.seq)) {
-              ApiUpdatesManager.saveUpdate({
-                _: 'updateMessageID',
-                random_id: randomIDS,
-                id: result.message.id
-              });
+              case 'audio':
+                inputMedia = {_: 'inputMediaUploadedAudio', file: inputFile, duration: 0};
+                break;
 
-              message.date = result.message.date;
-              message.id = result.message.id;
-              message.media = result.message.media;
-
-              ApiUpdatesManager.saveUpdate({
-                _: 'updateNewMessage',
-                message: message,
-                pts: result.pts
-              });
+              case 'document':
+              default:
+                inputMedia = {_: 'inputMediaUploadedDocument', file: inputFile, file_name: file.name, mime_type: file.type};
             }
+            MtpApiManager.invokeApi('messages.sendMedia', {
+              peer: inputPeer,
+              media: inputMedia,
+              random_id: randomID
+            }).then(function (result) {
+              if (ApiUpdatesManager.saveSeq(result.seq)) {
+                ApiUpdatesManager.saveUpdate({
+                  _: 'updateMessageID',
+                  random_id: randomIDS,
+                  id: result.message.id
+                });
 
+                message.date = result.message.date;
+                message.id = result.message.id;
+                message.media = result.message.media;
+
+                ApiUpdatesManager.saveUpdate({
+                  _: 'updateNewMessage',
+                  message: message,
+                  pts: result.pts
+                });
+              }
+
+            }, function (error) {
+              toggleError(true);
+            });
           }, function (error) {
             toggleError(true);
+          }, function (progress) {
+            // console.log('upload progress', progress);
+            media.progress.done = progress.done;
+            media.progress.percent = Math.max(1, Math.floor(100 * progress.done / progress.total));
+            $rootScope.$broadcast('history_update', {peerID: peerID});
           });
-        }, function (error) {
-          toggleError(true);
-        }, function (progress) {
-          // console.log('upload progress', progress);
-          media.progress.done = progress.done;
-          media.progress.percent = Math.max(1, Math.floor(100 * progress.done / progress.total));
-          $rootScope.$broadcast('history_update', {peerID: peerID});
+
+          media.progress.cancel = function () {
+            if (!uploaded) {
+              sendFileDeferred.resolve();
+              uploadPromise.cancel();
+              cancelPendingMessage(randomIDS);
+            }
+          }
+
+          uploadPromise['finally'](function () {
+            sendFileDeferred.resolve();
+          });
         });
 
-        media.progress.cancel = function () {
-          if (!uploaded) {
-            uploadPromise.cancel();
-            cancelPendingMessage(randomIDS);
-          }
-        }
+        sendFilePromise = sendFileDeferred.promise;
       };
 
       saveMessages([message]);
@@ -1670,6 +1736,7 @@ angular.module('myApp.services', [])
     notification.message = notificationMessage;
     notification.image = notificationPhoto.placeholder;
     notification.key = 'msg' + message.id;
+    notification.tag = peerString;
 
     if (notificationPhoto.location && !notificationPhoto.location.empty) {
       MtpApiFileManager.downloadSmallFile(notificationPhoto.location, notificationPhoto.size).then(function (url) {
@@ -1866,6 +1933,7 @@ angular.module('myApp.services', [])
     getDialogs: getDialogs,
     getHistory: getHistory,
     getSearch: getSearch,
+    getMessage: getMessage,
     readHistory: readHistory,
     flushHistory: flushHistory,
     deleteMessages: deleteMessages,
@@ -2003,6 +2071,8 @@ angular.module('myApp.services', [])
         full.height = fullPhotoSize.h;
       }
 
+      full.modalWidth = Math.max(full.width, Math.min(400, fullWidth));
+
       full.location = fullPhotoSize.location;
       full.size = fullPhotoSize.size;
     }
@@ -2013,9 +2083,10 @@ angular.module('myApp.services', [])
     return photo;
   }
 
-  function openPhoto (photoID, accessHash) {
+  function openPhoto (photoID, messageID) {
     var scope = $rootScope.$new(true);
     scope.photoID = photoID;
+    scope.messageID = messageID;
 
     var modalInstance = $modal.open({
       templateUrl: 'partials/photo_modal.html',
@@ -2121,11 +2192,10 @@ angular.module('myApp.services', [])
     return video;
   }
 
-  function openVideo (videoID, accessHash) {
+  function openVideo (videoID, messageID) {
     var scope = $rootScope.$new(true);
     scope.videoID = videoID;
-    scope.progress = {enabled: false};
-    scope.player = {};
+    scope.messageID = messageID;
 
     var modalInstance = $modal.open({
       templateUrl: 'partials/video_modal.html',
@@ -2937,6 +3007,18 @@ angular.module('myApp.services', [])
     }
   });
 
+  $rootScope.$on('apiUpdate', function (e, update) {
+    // console.log('on apiUpdate', update);
+    switch (update._) {
+      case 'updateNotifySettings':
+        if (update.peer._ == 'notifyPeer') {
+          var peerID = AppPeersManager.getPeerID(update.peer.peer);
+          savePeerSettings(peerID, update.notify_settings);
+        }
+        break;
+    }
+  });
+
   return {
     start: start,
     notify: notify,
@@ -2944,7 +3026,8 @@ angular.module('myApp.services', [])
     clear: notificationsClear,
     getPeerSettings: getPeerSettings,
     getPeerMuted: getPeerMuted,
-    savePeerSettings: savePeerSettings
+    savePeerSettings: savePeerSettings,
+    updatePeerSettings: updatePeerSettings
   };
 
   function getPeerSettings (peerID) {
@@ -2961,10 +3044,15 @@ angular.module('myApp.services', [])
   }
 
   function savePeerSettings (peerID, settings) {
+    // console.trace(dT(), 'peer settings', peerID, settings);
+    peerSettings[peerID] = $q.when(settings);
+  }
+
+  function updatePeerSettings (peerID, settings) {
+    savePeerSettings(peerID, settings);
+
     var inputSettings = angular.copy(settings);
     inputSettings._ = 'inputPeerNotifySettings';
-
-    peerSettings[peerID] = $q.when(settings);
 
     return MtpApiManager.invokeApi('account.updateNotifySettings', {
       peer: {
@@ -3030,7 +3118,8 @@ angular.module('myApp.services', [])
 
       var notification = new Notification(data.title, {
         icon: data.image || '',
-        body: data.message || ''
+        body: data.message || '',
+        tag: data.tag || ''
       });
 
       notification.onclick = function () {
@@ -3084,7 +3173,7 @@ angular.module('myApp.services', [])
 })
 
 
-.service('ErrorService', function ($rootScope, $modal) {
+.service('ErrorService', function ($rootScope, $modal, $window) {
 
   var shownBoxes = 0;
 
@@ -3119,9 +3208,35 @@ angular.module('myApp.services', [])
     });
   };
 
+  function confirm (params, options) {
+    options = options || {};
+    var scope = $rootScope.$new();
+    angular.extend(scope, params);
+
+    var modal = $modal.open({
+      templateUrl: 'partials/confirm_modal.html',
+      scope: scope,
+      windowClass: options.windowClass || 'confirm_modal_window'
+    });
+
+    return modal.result;
+  };
+
+  $window.safeConfirm = function (params, callback) {
+    if (typeof params === 'string') {
+      params = {message: params};
+    }
+    confirm(params).then(function (result) {
+      callback(result || true)
+    }, function () {
+      callback(false)
+    });
+  };
+
   return {
     show: show,
-    alert: alert
+    alert: alert,
+    confirm: confirm
   }
 })
 

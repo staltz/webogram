@@ -298,6 +298,9 @@ angular.module('myApp.directives', ['myApp.filters'])
       });
 
       $scope.$on('ui_editor_resize', updateSizes);
+      $scope.$on('ui_height', function () {
+        updateSizes();
+      });
 
       var atBottom = true;
       $(scrollableWrap).on('scroll', function (e) {
@@ -368,7 +371,7 @@ angular.module('myApp.directives', ['myApp.filters'])
 
   })
 
-  .directive('mySendForm', function ($timeout, AppConfigManager) {
+  .directive('mySendForm', function ($timeout, AppConfigManager, ErrorService) {
 
     return {
       link: link,
@@ -530,12 +533,10 @@ angular.module('myApp.directives', ['myApp.filters'])
 
           var blob = new Blob([array], {type: contentType});
 
-          if (safeConfirm('Are you sure to send file(s) from clipboard?')) {
-            $scope.$apply(function () {
-              $scope.draftMessage.files = [blob];
-              $scope.draftMessage.isMedia = true;
-            });
-          }
+          ErrorService.confirm({type: 'FILE_CLIPBOARD_PASTE'}).then(function () {
+            $scope.draftMessage.files = [blob];
+            $scope.draftMessage.isMedia = true;
+          });
         }
       };
 
@@ -551,8 +552,8 @@ angular.module('myApp.directives', ['myApp.filters'])
           }
         }
 
-        if (files.length && safeConfirm('Are you sure to send file(s) from clipboard?')) {
-          $scope.$apply(function () {
+        if (files.length > 0) {
+          ErrorService.confirm({type: 'FILES_CLIPBOARD_PASTE', files: files}).then(function () {
             $scope.draftMessage.files = files;
             $scope.draftMessage.isMedia = true;
           });
@@ -682,19 +683,18 @@ angular.module('myApp.directives', ['myApp.filters'])
       link: link,
       transclude: true,
       template:
-        '<div class="img_fullsize_with_progress_wrap" ng-style="{width: fullPhoto.width + \'px\', height: fullPhoto.height + \'px\'}">\
+        '<div class="img_fullsize_with_progress_wrap"">\
           <div class="img_fullsize_progress_overlay" ng-show="progress.enabled">\
-            <div class="img_fullsize_progress_wrap" ng-style="{width: fullPhoto.width + \'px\', height: fullPhoto.height + \'px\'}">\
-              <div class="img_fullsize_progress progress tg_progress">\
-                <div class="progress-bar progress-bar-success" role="progressbar" aria-valuenow="{{progress.percent}}" aria-valuemin="0" aria-valuemax="100" style="width: {{progress.percent}}%">\
-                  <span class="sr-only">{{progress.percent}}% Complete (success)</span>\
+            <div class="img_fullsize_progress_wrap"">\
+              <div class="img_fullsize_progress progress tg_progress" ng-show="progress.percent > 0">\
+                <div class="progress-bar progress-bar-success" ng-style="{width: progress.percent + \'%\'}">\
                 </div>\
               </div>\
             </div>\
           </div>\
           <div class="photo_full_wrap">\
             <a class="photo_modal_image">\
-              <img class="photo_modal_image" width="{{fullPhoto.width}}" height="{{fullPhoto.height}}" />\
+              <img class="photo_modal_image"/>\
             </a>\
           </div>\
           <div class="photo_modal_error_wrap" ng-if="error">\
@@ -710,53 +710,68 @@ angular.module('myApp.directives', ['myApp.filters'])
 
     function link ($scope, element, attrs) {
 
-      var imgElement = $('img', element);
+      var imgElement = $('img', element)[0],
+          resizeElements = $('.img_fullsize_with_progress_wrap', element)
+                            .add('.img_fullsize_progress_wrap', element)
+                            .add($(imgElement)),
+          resize = function () {
+            resizeElements.css({width: $scope.fullPhoto.width, height: $scope.fullPhoto.height});
+            $scope.$emit('ui_height');
+          };
 
-      imgElement
-          .attr('src', MtpApiFileManager.getCachedFile($scope.thumbLocation) || 'img/blank.gif')
-          .addClass('thumb_blurred')
-          .addClass('thumb_blur_animation');
+      var jump = 0;
+      $scope.$watchCollection('fullPhoto.location', function () {
+        var cachedSrc = MtpApiFileManager.getCachedFile($scope.thumbLocation),
+            curJump = ++jump;
 
-      if (!$scope.fullPhoto.location) {
-        return;
-      }
-
-
-      var apiPromise;
-      if ($scope.fullPhoto.size) {
-        var inputLocation = {
-          _: 'inputFileLocation',
-          volume_id: $scope.fullPhoto.location.volume_id,
-          local_id: $scope.fullPhoto.location.local_id,
-          secret: $scope.fullPhoto.location.secret
-        };
-        apiPromise = MtpApiFileManager.downloadFile($scope.fullPhoto.location.dc_id, inputLocation, $scope.fullPhoto.size);
-      } else {
-        apiPromise = MtpApiFileManager.downloadSmallFile($scope.fullPhoto.location);
-      }
-
-      $scope.progress = {enabled: true, percent: 1};
-
-      apiPromise.then(function (url) {
-        $scope.progress.enabled = false;
-        imgElement
-          .attr('src', url)
-          .removeClass('thumb_blurred');
-
-      }, function (e) {
-        console.log('Download image failed', e, $scope.fullPhoto.location);
-        $scope.progress.enabled = false;
-
-        if (e && e.type == 'FS_BROWSER_UNSUPPORTED') {
-          $scope.error = {html: 'Your browser doesn\'t support <a href="https://developer.mozilla.org/en-US/docs/Web/API/LocalFileSystem" target="_blank">LocalFileSystem</a> feature which is needed to display this image.<br/>Please, install <a href="http://google.com/chrome" target="_blank">Google Chrome</a> or use <a href="https://telegram.org/" target="_blank">mobile app</a> instead.'};
+        if (cachedSrc) {
+          imgElement.src = cachedSrc;
+          resize();
         } else {
-          $scope.error = {text: 'Download failed', error: e};
+          imgElement.src = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
         }
-      }, function (progress) {
-        $scope.progress.percent = Math.max(1, Math.floor(100 * progress.done / progress.total));
-      });
-    }
 
+        if (!$scope.fullPhoto.location) {
+          return;
+        }
+
+        var apiPromise;
+        if ($scope.fullPhoto.size) {
+          var inputLocation = {
+            _: 'inputFileLocation',
+            volume_id: $scope.fullPhoto.location.volume_id,
+            local_id: $scope.fullPhoto.location.local_id,
+            secret: $scope.fullPhoto.location.secret
+          };
+          apiPromise = MtpApiFileManager.downloadFile($scope.fullPhoto.location.dc_id, inputLocation, $scope.fullPhoto.size);
+        } else {
+          apiPromise = MtpApiFileManager.downloadSmallFile($scope.fullPhoto.location);
+        }
+
+        $scope.progress = {enabled: true, percent: 0};
+
+        apiPromise.then(function (url) {
+          if (curJump == jump) {
+            $scope.progress.enabled = false;
+            imgElement.src = url;
+            resize();
+          }
+        }, function (e) {
+          console.log('Download image failed', e, $scope.fullPhoto.location);
+          $scope.progress.enabled = false;
+
+          if (e && e.type == 'FS_BROWSER_UNSUPPORTED') {
+            $scope.error = {html: 'Your browser doesn\'t support <a href="https://developer.mozilla.org/en-US/docs/Web/API/LocalFileSystem" target="_blank">LocalFileSystem</a> feature which is needed to display this image.<br/>Please, install <a href="http://google.com/chrome" target="_blank">Google Chrome</a> or use <a href="https://telegram.org/" target="_blank">mobile app</a> instead.'};
+          } else {
+            $scope.error = {text: 'Download failed', error: e};
+          }
+        }, function (progress) {
+          $scope.progress.percent = Math.max(1, Math.floor(100 * progress.done / progress.total));
+        });
+      })
+
+      resize();
+    }
   })
 
 
@@ -770,9 +785,7 @@ angular.module('myApp.directives', ['myApp.filters'])
           <div class="img_fullsize_progress_overlay" ng-show="progress.enabled">\
             <div class="img_fullsize_progress_wrap" ng-style="{width: video.full.width + \'px\', height: video.full.height + \'px\'}">\
               <div class="img_fullsize_progress progress tg_progress">\
-                <div class="progress-bar progress-bar-success" role="progressbar" aria-valuenow="{{progress.percent}}" aria-valuemin="0" aria-valuemax="100" style="width: {{progress.percent}}%">\
-                  <span class="sr-only">{{progress.percent}}% Complete (success)</span>\
-                </div>\
+                <div class="progress-bar progress-bar-success" style="width: {{progress.percent}}%"></div>\
               </div>\
             </div>\
           </div>\
@@ -974,6 +987,44 @@ angular.module('myApp.directives', ['myApp.filters'])
 
   })
 
+  .directive('myModalNav', function () {
+
+    return {
+      link: link
+    };
+
+    function link($scope, element, attrs) {
+
+      var onKeyDown = function (event) {
+        var target = event.target;
+        if (target && (target.tagName == 'INPUT' || target.tagName == 'TEXTAREA')) {
+          return false;
+        }
+
+        switch (event.keyCode) {
+          case 39: // right
+          case 32: // space
+          case 34: // pg down
+          case 40: // down
+            $scope.$eval(attrs.next);
+            break;
+
+          case 37: // left
+          case 33: // pg up
+          case 38: // up
+            $scope.$eval(attrs.prev);
+            break;
+        }
+      };
+
+      $(document).on('keydown', onKeyDown);
+
+      $scope.$on('$destroy', function () {
+        $(document).off('keydown', onKeyDown);
+      });
+    };
+  })
+
 
   .directive('myModalPosition', function ($window, $timeout) {
 
@@ -992,9 +1043,12 @@ angular.module('myApp.directives', ['myApp.filters'])
         } else {
           $(element[0].parentNode).css('marginTop', '');
         }
-        $timeout(function () {
-          $(element[0].parentNode).addClass('modal-content-animated');
-        }, 300);
+
+        if (attrs.animation != 'no') {
+          $timeout(function () {
+            $(element[0].parentNode).addClass('modal-content-animated');
+          }, 300);
+        }
       };
 
       onContentLoaded(updateMargin);
@@ -1018,6 +1072,8 @@ angular.module('myApp.directives', ['myApp.filters'])
 
     function link($scope, element, attrs) {
 
+      var prevMargin = false;
+
       var updateMargin = function () {
         var height = element[0].offsetHeight,
             contHeight = $($window).height(),
@@ -1025,6 +1081,12 @@ angular.module('myApp.directives', ['myApp.filters'])
             margin = height < contHeight ? parseInt((contHeight - height) * ratio) : '';
 
         element.css({marginTop: margin, marginBottom: margin});
+
+        if (prevMargin !== margin) {
+          $scope.$emit('ui_height');
+        }
+
+        prevMargin = margin;
       };
 
       onContentLoaded(updateMargin);
@@ -1034,6 +1096,8 @@ angular.module('myApp.directives', ['myApp.filters'])
       $scope.$on('ui_height', function () {
         onContentLoaded(updateMargin);
       });
+
+
 
     };
 
