@@ -1,7 +1,8 @@
 <div class="error_modal_wrap" my-modal-position>
 
+  <a class="modal-close-button" ng-click="$close()"><i></i></a>
+
   <div class="modal-header">
-    <a class="modal-close-link" ng-click="$close()">Close</a>
     <h4 ng-if="error" class="modal-title" ng-switch="error.type">
       <span ng-switch-when="ACCOUNT_REQUIRED">No account</span>
       <span ng-switch-default ng-switch="error.code">
@@ -56,7 +57,7 @@
 
     <div ng-if="error" class="error_modal_details" ng-switch="error.detailsShown">
       <textarea ng-switch-when="true" rows="3" onclick="this.select()">Method: {{error.input || 'N/A'}}
-Result: {{error.originalError || error}}
+Result: {{error.originalError ? error.originalError : (error.stack ? (error.name || '') + ' ' + (error.description || error.message) : error)}}
 Stack: {{error.stack}}</textarea>
       <div ng-switch-default>
         <a href="" ng-click="error.detailsShown = true">Technical details here</a>
