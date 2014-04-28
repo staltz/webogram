@@ -775,7 +775,9 @@ TLDeserialization.prototype.fetchBool = function (field) {
   } else if (i == 0xbc799737) {
     return false
   }
-  throw new Error('Unknown Bool constructor ' + i);
+
+  this.offset -= 4;
+  return this.fetchObject('Object', field);
 }
 
 TLDeserialization.prototype.fetchString = function (field) {
@@ -1261,6 +1263,7 @@ factory('MtpAuthorizer', function (MtpDcConfigurator, MtpRsaKeysManager, MtpSecu
         mtpSendReqDhParams(auth);
       }
     }, function (error) {
+      console.log(dT(), 'req_pq error', error.message);
       deferred.reject(error);
     });
 
@@ -1775,7 +1778,7 @@ factory('MtpNetworkerFactory', function (MtpDcConfigurator, MtpMessageIdGenerato
       serializer.storeInt(2496, 'api_id');
       serializer.storeString(navigator.userAgent || 'Unknown UserAgent', 'device_model');
       serializer.storeString(navigator.platform  || 'Unknown Platform', 'system_version');
-      serializer.storeString('0.1', 'app_version');
+      serializer.storeString('0.0.21', 'app_version');
       serializer.storeString(navigator.language || 'en', 'lang_code');
     }
 
@@ -2636,7 +2639,10 @@ factory('MtpApiManager', function (AppConfigManager, MtpAuthorizer, MtpNetworker
         },
         function (error) {
           console.error(dT(), 'Error', error.code, error.type, baseDcID, dcID);
-          if (error.code == 401 && baseDcID && dcID != baseDcID) {
+          if (error.code == 401 && baseDcID == dcID) {
+            AppConfigManager.remove('dc', 'user_auth');
+          }
+          else if (error.code == 401 && baseDcID && dcID != baseDcID) {
             if (cachedExportPromise[dcID] === undefined) {
               var exportDeferred = $q.defer();
 

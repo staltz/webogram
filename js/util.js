@@ -39,9 +39,10 @@ function checkDragEvent(e) {
 
 function cancelEvent (event) {
   event = event || window.event;
+  if (event) event = event.originalEvent || event;
 
-  event.stopPropagation && event.stopPropagation();
-  event.preventDefault && event.preventDefault();
+  if (event.stopPropagation) event.stopPropagation();
+  if (event.preventDefault) event.preventDefault();
 
   return false;
 }
@@ -75,5 +76,35 @@ function safeReplaceObject (wasObject, newObject) {
       wasObject[key] = newObject[key];
     }
   }
+}
+
+function listMergeSorted (list1, list2) {
+  list1 = list1 || [];
+  list2 = list2 || [];
+
+  var result = angular.copy(list1);
+
+  var minID = list1.length ? list1[list1.length - 1] : 0xFFFFFFFF;
+  for (var i = 0; i < list2.length; i++) {
+    if (list2[i] < minID) {
+      result.push(list2[i]);
+    }
+  }
+
+  return result;
+}
+
+function listUniqSorted (list) {
+  list = list || [];
+  var resultList = [],
+      prev = false;
+  for (var i = 0; i < list.length; i++) {
+    if (list[i] !== prev) {
+      resultList.push(list[i])
+    }
+    prev = list[i];
+  }
+
+  return resultList;
 }
 

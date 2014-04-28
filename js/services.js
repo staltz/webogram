@@ -564,7 +564,7 @@ angular.module('myApp.services', [])
   var badCharsRe = /[`~!@#$%^&*()\-_=+\[\]\\|{}'";:\/?.>,<\s]+/g,
       trimRe = /^\s+|\s$/g,
       accentsReplace = {
-        a: /[áâäà]/g,
+        a: /[åáâäà]/g,
         e: /[éêëè]/g,
         i: /[íîïì]/g,
         o: /[óôöò]/g,
@@ -691,6 +691,9 @@ angular.module('myApp.services', [])
 
   var dialogsIndex = SearchIndexManager.createIndex(),
       cachedResults = {query: false};
+
+  var lastSearchFilter = {},
+      lastSearchResults = [];
 
   NotificationsManager.start();
 
@@ -892,7 +895,14 @@ angular.module('myApp.services', [])
   }
 
   function getSearch (inputPeer, query, inputFilter, maxID, limit) {
-    var foundMsgs = [];
+    var foundMsgs = [],
+        useSearchCache = !query,
+        sameSearchCache = useSearchCache && angular.equals(lastSearchFilter, inputFilter);
+
+    if (useSearchCache && !sameSearchCache) {
+      lastSearchFilter = inputFilter;
+      lastSearchResults = [];
+    }
 
     if (!maxID && !query) {
       var peerID = AppPeersManager.getPeerID(inputPeer),
@@ -931,9 +941,27 @@ angular.module('myApp.services', [])
           }
         }
       }
+
+      // console.log(dT(), sameSearchCache, foundMsgs, lastSearchResults);
+      if (foundMsgs.length < neededLimit && lastSearchResults.length && sameSearchCache) {
+        var minID = foundMsgs.length ? foundMsgs[foundMsgs.length - 1] : 0xFFFFFFFF;
+        for (var i = 0; i < lastSearchResults.length; i++) {
+          if (lastSearchResults[i] < minID) {
+            foundMsgs.push(lastSearchResults[i]);
+            if (foundMsgs.length >= neededLimit) {
+              break;
+            }
+          }
+        }
+      }
+      // console.log(dT(), foundMsgs);
     }
 
     if (foundMsgs.length || limit == 1000) {
+      if (useSearchCache) {
+        lastSearchResults = listMergeSorted(lastSearchResults, foundMsgs);
+      }
+
       return $q.when({
         count: null,
         history: foundMsgs
@@ -961,6 +989,10 @@ angular.module('myApp.services', [])
       angular.forEach(searchResult.messages, function (message) {
         foundMsgs.push(message.id);
       });
+
+      if (useSearchCache) {
+        lastSearchResults = listMergeSorted(lastSearchResults, foundMsgs);
+      }
 
       return {
         count: foundCount,
@@ -2313,8 +2345,9 @@ angular.module('myApp.services', [])
     }
 
     var doc = angular.copy(docs[docID]),
-        width = 100,
-        height = 100,
+        isGif = doc.mime_type == 'image/gif',
+        width = isGif ? 260 : 100,
+        height = isGif ? 260 : 100,
         thumbPhotoSize = doc.thumb,
         thumb = {
           // placeholder: 'img/placeholders/DocThumbConversation.jpg',
@@ -2337,18 +2370,22 @@ angular.module('myApp.services', [])
     doc.thumb = thumb;
 
     doc.canDownload = !(window.chrome && chrome.fileSystem && chrome.fileSystem.chooseEntry);
-    doc.withPreview = doc.canDownload && doc.mime_type.match(/^(image\/|application\/pdf)/);
+    doc.withPreview = doc.canDownload && doc.mime_type.match(/^(image\/|application\/pdf)/) ? 1 : 0;
+
+    if (isGif) {
+      doc.isSpecial = 'gif';
+    }
 
     return docsForHistory[docID] = doc;
   }
 
-  function downloadDoc (docID, accessHash, popup) {
+  function downloadDoc (docID, action) {
     var doc = docs[docID],
         historyDoc = docsForHistory[docID] || doc || {},
         inputFileLocation = {
           _: 'inputDocumentFileLocation',
           id: docID,
-          access_hash: accessHash || doc.access_hash
+          access_hash: doc.access_hash
         };
 
     historyDoc.progress = {enabled: true, percent: 1, total: doc.size};
@@ -2390,23 +2427,26 @@ angular.module('myApp.services', [])
       downloadPromise.then(function (url) {
         delete historyDoc.progress;
 
-        if (popup) {
-          window.open(url, '_blank');
-          return
+        historyDoc.url = url;
+
+        switch (action) {
+          case 1:
+            window.open(url, '_blank');
+
+          default:
+            var a = $('<a>Download</a>')
+                      .css({position: 'absolute', top: 1, left: 1})
+                      .attr('href', url)
+                      .attr('target', '_blank')
+                      .attr('download', doc.file_name)
+                      .appendTo('body');
+
+            a[0].dataset.downloadurl = [doc.mime_type, doc.file_name, url].join(':');
+            a[0].click();
+            $timeout(function () {
+              a.remove();
+            }, 100);
         }
-
-        var a = $('<a>Download</a>')
-                  .css({position: 'absolute', top: 1, left: 1})
-                  .attr('href', url)
-                  .attr('target', '_blank')
-                  .attr('download', doc.file_name)
-                  .appendTo('body');
-
-        a[0].dataset.downloadurl = [doc.mime_type, doc.file_name, url].join(':');
-        a[0].click();
-        $timeout(function () {
-          a.remove();
-        }, 100);
       }, function (e) {
         console.log('document download failed', e);
         historyDoc.progress.enabled = false;
@@ -2461,7 +2501,7 @@ angular.module('myApp.services', [])
       $rootScope.$broadcast('history_update');
     }
 
-    var downloadPromise = MtpApiFileManager.downloadFile(audio.dc_id, inputFileLocation, audio.size, null, {mime: 'audio/mpeg'});
+    var downloadPromise = MtpApiFileManager.downloadFile(audio.dc_id, inputFileLocation, audio.size, null, {mime: 'audio/ogg'});
 
     downloadPromise.then(function (url) {
       delete historyAudio.progress;
@@ -3218,7 +3258,7 @@ angular.module('myApp.services', [])
     if (typeof params === 'string') {
       params = {message: params};
     }
-    confirm(params).then(function (result) {
+    confirm(params.message).then(function (result) {
       callback(result || true)
     }, function () {
       callback(false)
@@ -3236,9 +3276,11 @@ angular.module('myApp.services', [])
 
 .service('PeersSelectService', function ($rootScope, $modal) {
 
-  function selectPeer () {
+  function selectPeer (options) {
     var scope = $rootScope.$new();
-    // angular.extend(scope, params);
+    if (options) {
+      angular.extend(scope, options);
+    }
 
     return $modal.open({
       templateUrl: 'partials/peer_select.html',

@@ -21,7 +21,10 @@ angular.module('myApp.controllers', [])
     });
   })
 
-  .controller('AppLoginController', function ($scope, $location, $timeout, MtpApiManager, ErrorService) {
+  .controller('AppLoginController', function ($scope, $location, $timeout, $modal, $modalStack, MtpApiManager, ErrorService) {
+
+    $modalStack.dismissAll();
+
     MtpApiManager.getUserID().then(function (id) {
       if (id) {
         $location.url('/im');
@@ -30,9 +33,50 @@ angular.module('myApp.controllers', [])
     });
     var options = {dcID: 1, createNetworker: true};
 
-    $scope.credentials = {};
+    $scope.credentials = {phone_country: '+1', phone_country_name: 'USA', phone_number: '', phone_full: ''};
     $scope.progress = {};
     $scope.callPending = {};
+
+    $scope.selectCountry = function () {
+      var modal = $modal.open({
+        templateUrl: 'partials/country_select_modal.html',
+        controller: 'CountrySelectModalController',
+        windowClass: 'countries_modal_window'
+      });
+
+      modal.result.then(function (code) {
+        $scope.credentials.phone_country = code;
+        $scope.$broadcast('country_selected');
+      });
+    };
+
+    $scope.$watch('credentials.phone_country', updateCountry);
+    $scope.$watch('credentials.phone_number', updateCountry);
+
+    function updateCountry () {
+      var phoneNumber = (
+            ($scope.credentials.phone_country || '') +
+            ($scope.credentials.phone_number || '')
+          ).replace(/\D+/g, ''),
+          i, j, code,
+          maxLength = 0,
+          maxName = false;
+
+      if (phoneNumber.length) {
+        for (i = 0; i < Config.CountryCodes.length; i++) {
+          for (j = 1; j < Config.CountryCodes[i].length; j++) {
+            code = Config.CountryCodes[i][j].replace(/\D+/g, '');
+            if (code.length >= maxLength && !phoneNumber.indexOf(code)) {
+              maxLength = code.length;
+              maxName = Config.CountryCodes[i][0];
+            }
+          }
+        }
+      }
+
+      $scope.credentials.phone_full = phoneNumber;
+      $scope.credentials.phone_country_name = maxName || 'Unknown';
+    };
 
     var callTimeout;
 
@@ -51,7 +95,7 @@ angular.module('myApp.controllers', [])
       if (!(--$scope.callPending.remaining)) {
         $scope.callPending.success = false;
         MtpApiManager.invokeApi('auth.sendCall', {
-          phone_number: $scope.credentials.phone_number,
+          phone_number: $scope.credentials.phone_full,
           phone_code_hash: $scope.credentials.phone_code_hash
         }, options).then(function () {
           $scope.callPending.success = true;
@@ -63,38 +107,53 @@ angular.module('myApp.controllers', [])
 
     $scope.sendCode = function () {
       $timeout.cancel(callTimeout);
-      $scope.progress.enabled = true;
-      MtpApiManager.invokeApi('auth.checkPhone', {
+
+      ErrorService.confirm({
+        type: 'LOGIN_PHONE_CORRECT',
+        country_code: $scope.credentials.phone_country,
         phone_number: $scope.credentials.phone_number
-      }, options).then(function (result) {
-        $scope.progress.enabled = false;
-        if (!result.phone_registered) {
-          ErrorService.show({
-            error: {code: 400, type: 'ACCOUNT_REQUIRED'},
-            phone: $scope.credentials.phone_number
-          });
-          return false;
-        }
-
+      }).then(function () {
         $scope.progress.enabled = true;
-        MtpApiManager.invokeApi('auth.sendCode', {
-          phone_number: $scope.credentials.phone_number,
-          sms_type: 0,
-          api_id: 2496,
-          api_hash: '8da85b0d5bfe62527e5b244c209159c3'
-        }, options).then(function (sentCode) {
+        MtpApiManager.invokeApi('auth.checkPhone', {
+          phone_number: $scope.credentials.phone_full
+        }, options).then(function (result) {
           $scope.progress.enabled = false;
+          if (!result.phone_registered) {
+            ErrorService.show({
+              error: {code: 400, type: 'ACCOUNT_REQUIRED'},
+              phone: $scope.credentials.phone_full
+            });
+            return false;
+          }
 
-          $scope.credentials.phone_code_hash = sentCode.phone_code_hash;
-          $scope.credentials.phone_occupied = sentCode.phone_registered;
-          $scope.error = {};
+          $scope.progress.enabled = true;
+          MtpApiManager.invokeApi('auth.sendCode', {
+            phone_number: $scope.credentials.phone_full,
+            sms_type: 0,
+            api_id: 2496,
+            api_hash: '8da85b0d5bfe62527e5b244c209159c3'
+          }, options).then(function (sentCode) {
+            $scope.progress.enabled = false;
 
-          $scope.callPending.remaining = sentCode.send_call_timeout;
-          callCheck();
+            $scope.credentials.phone_code_hash = sentCode.phone_code_hash;
+            $scope.credentials.phone_occupied = sentCode.phone_registered;
+            $scope.error = {};
 
+            $scope.callPending.remaining = sentCode.send_call_timeout;
+            callCheck();
+
+          }, function (error) {
+            $scope.progress.enabled = false;
+            console.log('sendCode error', error);
+            switch (error.type) {
+              case 'PHONE_NUMBER_INVALID':
+                $scope.error = {field: 'phone'};
+                error.handled = true;
+                break;
+            }
+          });
         }, function (error) {
           $scope.progress.enabled = false;
-          console.log('sendCode error', error);
           switch (error.type) {
             case 'PHONE_NUMBER_INVALID':
               $scope.error = {field: 'phone'};
@@ -102,20 +161,14 @@ angular.module('myApp.controllers', [])
               break;
           }
         });
-      }, function (error) {
-        $scope.progress.enabled = false;
-        switch (error.type) {
-          case 'PHONE_NUMBER_INVALID':
-            $scope.error = {field: 'phone'};
-            error.handled = true;
-            break;
-        }
       });
+
+
     }
 
     $scope.logIn = function (forceSignUp) {
       var method = 'auth.signIn', params = {
-        phone_number: $scope.credentials.phone_number,
+        phone_number: $scope.credentials.phone_full,
         phone_code_hash: $scope.credentials.phone_code_hash,
         phone_code: $scope.credentials.phone_code
       };
@@ -402,6 +455,7 @@ angular.module('myApp.controllers', [])
         offset = 0,
         hasMore = false,
         maxID = 0,
+        lastSelectID = false,
         inputMediaFilters = {
           photos: 'inputMessagesFilterPhotos',
           video: 'inputMessagesFilterVideo',
@@ -471,6 +525,8 @@ angular.module('myApp.controllers', [])
         if (prevMessage &&
             curMessage.from_id == prevMessage.from_id &&
             curMessage.date < prevMessage.date + 30 &&
+            !prevMessage.action &&
+            !curMessage.action &&
             !prevMessage.fwd_from_id &&
             !curMessage.fwd_from_id &&
             curMessage.message && curMessage.message.length < 60) {
@@ -569,11 +625,20 @@ angular.module('myApp.controllers', [])
       $scope.$broadcast('ui_history_change');
     }
 
-    function toggleMessage (messageID, target) {
+    function toggleMessage (messageID, $event) {
+      var target = $event.target,
+          shiftClick = $event.shiftKey;
+
+      if (shiftClick) {
+        $scope.$broadcast('ui_selection_clear');
+      }
+
       if (!$scope.selectActions && !$(target).hasClass('icon-select-tick') && !$(target).hasClass('im_content_message_select_area')) {
         return false;
       }
+
       if ($scope.selectedMsgs[messageID]) {
+        lastSelectID = false;
         delete $scope.selectedMsgs[messageID];
         $scope.selectedCount--;
         if (!$scope.selectedCount) {
@@ -581,6 +646,31 @@ angular.module('myApp.controllers', [])
           $scope.$broadcast('ui_panel_update');
         }
       } else {
+
+        if (!shiftClick) {
+          lastSelectID = messageID;
+        } else if (lastSelectID != messageID) {
+          var dir = lastSelectID > messageID,
+              i, startPos, curMessageID;
+
+          for (i = 0; i < $scope.history.length; i++) {
+            if ($scope.history[i].id == lastSelectID) {
+              startPos = i;
+              break;
+            }
+          }
+
+          i = startPos;
+          while ($scope.history[i] &&
+                 (curMessageID = $scope.history[i].id) != messageID) {
+            if (!$scope.selectedMsgs[curMessageID]) {
+              $scope.selectedMsgs[curMessageID] = true;
+              $scope.selectedCount++;
+            }
+            i += dir ? -1 : +1;
+          }
+        }
+
         $scope.selectedMsgs[messageID] = true;
         $scope.selectedCount++;
         if (!$scope.selectActions) {
@@ -594,6 +684,7 @@ angular.module('myApp.controllers', [])
       $scope.selectedMsgs = {};
       $scope.selectedCount = 0;
       $scope.selectActions = false;
+      lastSelectID = false;
       if (!noBroadcast) {
         $scope.$broadcast('ui_panel_update');
       }
@@ -627,7 +718,7 @@ angular.module('myApp.controllers', [])
           selectedMessageIDs.push(messageID);
         });
 
-        PeersSelectService.selectPeer().then(function (peerString) {
+        PeersSelectService.selectPeer({confirm_type: 'FORWARD_PEER'}).then(function (peerString) {
           var peerID = AppPeersManager.getPeerID(peerString);
           AppMessagesManager.forwardMessages(peerID, selectedMessageIDs).then(function () {
             selectedCancel();
@@ -957,7 +1048,7 @@ angular.module('myApp.controllers', [])
 
     $scope.forward = function () {
       var messageID = $scope.messageID;
-      PeersSelectService.selectPeer().then(function (peerString) {
+      PeersSelectService.selectPeer({confirm_type: 'PHOTO_SHARE_PEER'}).then(function (peerString) {
         var peerID = AppPeersManager.getPeerID(peerString);
         AppMessagesManager.forwardMessages(peerID, [messageID]).then(function () {
           $rootScope.$broadcast('history_focus', {peerString: peerString});
@@ -1006,7 +1097,7 @@ angular.module('myApp.controllers', [])
 
     $scope.forward = function () {
       var messageID = $scope.messageID;
-      PeersSelectService.selectPeer().then(function (peerString) {
+      PeersSelectService.selectPeer({confirm_type: 'VIDEO_SHARE_PEER'}).then(function (peerString) {
         var peerID = AppPeersManager.getPeerID(peerString);
         AppMessagesManager.forwardMessages(peerID, [messageID]).then(function () {
           $rootScope.$broadcast('history_focus', {peerString: peerString});
@@ -1097,7 +1188,7 @@ angular.module('myApp.controllers', [])
     };
 
     $scope.shareContact = function () {
-      PeersSelectService.selectPeer().then(function (peerString) {
+      PeersSelectService.selectPeer({confirm_type: 'SHARE_CONTACT_PEER'}).then(function (peerString) {
         var peerID = AppPeersManager.getPeerID(peerString);
 
         AppMessagesManager.sendOther(peerID, {
@@ -1524,12 +1615,25 @@ angular.module('myApp.controllers', [])
 
   })
 
-  .controller('PeerSelectController', function ($scope, $modalInstance) {
+  .controller('PeerSelectController', function ($scope, $modalInstance, $q, AppPeersManager, ErrorService) {
 
     $scope.dialogSelect = function (peerString) {
-      $modalInstance.close(peerString);
+      var promise;
+      if ($scope.confirm_type) {
+        var peerID = AppPeersManager.getPeerID(peerString),
+            peerData = AppPeersManager.getPeer(peerID);
+        promise = ErrorService.confirm({
+          type: $scope.confirm_type,
+          peer_id: peerID,
+          peer_data: peerData
+        });
+      } else {
+        promise = $q.when();
+      }
+      promise.then(function () {
+        $modalInstance.close(peerString);
+      });
     };
-
   })
 
   .controller('ChatCreateModalController', function ($scope, $modalInstance, $rootScope, MtpApiManager, AppUsersManager, AppChatsManager, ApiUpdatesManager) {
@@ -1626,4 +1730,36 @@ angular.module('myApp.controllers', [])
       }
     };
 
+  })
+
+  .controller('CountrySelectModalController', function ($scope, $modalInstance, $rootScope, SearchIndexManager) {
+
+    $scope.search = {};
+
+    var searchIndex = SearchIndexManager.createIndex();
+
+    for (var i = 0; i < Config.CountryCodes.length; i++) {
+      SearchIndexManager.indexObject(i, Config.CountryCodes[i].join(' '), searchIndex);
+    }
+
+    $scope.$watch('search.query', function (newValue) {
+      var filtered = false,
+          results = {};
+
+      if (angular.isString(newValue) && newValue.length) {
+        filtered = true;
+        results = SearchIndexManager.search(newValue, searchIndex);
+      }
+
+      $scope.countries = [];
+      var j;
+      for (var i = 0; i < Config.CountryCodes.length; i++) {
+        if (!filtered || results[i]) {
+          for (j = 1; j < Config.CountryCodes[i].length; j++) {
+            $scope.countries.push({name: Config.CountryCodes[i][0], code: Config.CountryCodes[i][j]});
+          }
+        }
+      }
+
+    });
   })
