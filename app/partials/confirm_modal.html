@@ -9,6 +9,11 @@
       <span ng-switch-when="WEBOGRAM_UPDATED_RELOAD">A new version of Webogram is available. Load it?</span>
       <span ng-switch-when="HISTORY_FLUSH">Are you sure? This can not be undone!</span>
       <span ng-switch-when="TERMINATE_SESSIONS">Are you sure you want to log out all devices except for the current one?</span>
+      <span ng-switch-when="HTTPS_MIXED_FAIL">
+        Your browser does not support mixed content which is neccessary for MTProto support on https. <a href="https://github.com/zhukov/webogram/issues/237" target="_blank">Learn more &raquo;</a><br/><br/>
+        Would you like use http-version instead?
+      </span>
+
       <span ng-switch-when="FILES_CLIPBOARD_PASTE">
         <ng-pluralize count="files.length"
                      when="{'one': 'Are you sure to send file from clipboard?', 'other': 'Are you sure to send {} files from clipboard?'}">
@@ -20,22 +25,14 @@
         Is this phone number correct?
         <div class="confirm_phone_number"> <span ng-bind="country_code"></span> <span ng-bind="phone_number"></span> </div>
       </div>
-      <span ng-switch-when="FORWARD_PEER">Are you sure to forward message(s) to <span ng-switch="peer_id > 0">
-        <span ng-switch-when="true">user <div class="confirm_peer" ng-bind-html="peer_data.rFullName"></div></span>
-        <span ng-switch-default>group <div class="confirm_peer" ng-bind-html="peer_data.rTitle"></div></span>
-      </span></span>
-      <span ng-switch-when="PHOTO_SHARE_PEER">Are you sure to forward photo to <span ng-switch="peer_id > 0">
-        <span ng-switch-when="true">user <div class="confirm_peer" ng-bind-html="peer_data.rFullName"></div></span>
-        <span ng-switch-default>group <div class="confirm_peer" ng-bind-html="peer_data.rTitle"></div></span>
-      </span></span>
-      <span ng-switch-when="VIDEO_SHARE_PEER">Are you sure to forward video to <span ng-switch="peer_id > 0">
-        <span ng-switch-when="true">user <div class="confirm_peer" ng-bind-html="peer_data.rFullName"></div></span>
-        <span ng-switch-default>group <div class="confirm_peer" ng-bind-html="peer_data.rTitle"></div></span>
-      </span></span>
-      <span ng-switch-when="SHARE_CONTACT_PEER">Are you sure to send contact to <span ng-switch="peer_id > 0">
-        <span ng-switch-when="true">user <div class="confirm_peer" ng-bind-html="peer_data.rFullName"></div></span>
-        <span ng-switch-default>group <div class="confirm_peer" ng-bind-html="peer_data.rTitle"></div></span>
-      </span></span>
+      <span ng-switch-when="FORWARD_PEER">Forward to <strong ng-switch="peer_id > 0">
+        <span ng-switch-when="true" ng-bind-html="peer_data.rFullName"></span>
+        <span ng-switch-default ng-bind-html="peer_data.rTitle"></span>
+      </strong>?</span>
+      <span ng-switch-when="SHARE_CONTACT_PEER">Send to <strong ng-switch="peer_id > 0">
+        <span ng-switch-when="true" ng-bind-html="peer_data.rFullName"></span>
+        <span ng-switch-default ng-bind-html="peer_data.rTitle"></span>
+      </strong>?</span>
       <span ng-switch-default ng-bind="message || 'Are you sure?'"></span>
     </div>
 

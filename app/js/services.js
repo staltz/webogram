@@ -1,5 +1,5 @@
 /*!
- * Webogram v0.0.21 - messaging web application for MTProto
+ * Webogram v0.1.1 - messaging web application for MTProto
  * https://github.com/zhukov/webogram
  * Copyright (C) 2014 Igor Zhukov <igor.beatle@gmail.com>
  * https://github.com/zhukov/webogram/blob/master/LICENSE
@@ -897,16 +897,17 @@ angular.module('myApp.services', [])
   function getSearch (inputPeer, query, inputFilter, maxID, limit) {
     var foundMsgs = [],
         useSearchCache = !query,
-        sameSearchCache = useSearchCache && angular.equals(lastSearchFilter, inputFilter);
+        peerID = AppPeersManager.getPeerID(inputPeer),
+        newSearchFilter = {peer: peerID, filter: inputFilter},
+        sameSearchCache = useSearchCache && angular.equals(lastSearchFilter, newSearchFilter);
 
     if (useSearchCache && !sameSearchCache) {
-      lastSearchFilter = inputFilter;
+      lastSearchFilter = newSearchFilter;
       lastSearchResults = [];
     }
 
     if (!maxID && !query) {
-      var peerID = AppPeersManager.getPeerID(inputPeer),
-          historyStorage = historiesStorage[peerID];
+      var historyStorage = historiesStorage[peerID];
 
       if (historyStorage !== undefined && historyStorage.history.length) {
         var neededContents = {},
@@ -1980,7 +1981,7 @@ angular.module('myApp.services', [])
   }
 })
 
-.service('AppPhotosManager', function ($modal, $window, $rootScope, MtpApiFileManager, AppUsersManager) {
+.service('AppPhotosManager', function ($modal, $window, $timeout, $rootScope, MtpApiFileManager, AppUsersManager) {
   var photos = {};
 
   function savePhoto (apiPhoto) {
@@ -2128,6 +2129,65 @@ angular.module('myApp.services', [])
     });
   }
 
+  function downloadPhoto (photoID) {
+    var photo = photos[photoID],
+        ext = 'jpg',
+        mimeType = 'image/jpeg',
+        fileName = 'photo' + photoID + '.' + ext,
+        fullWidth = $(window).width() - 36,
+        fullHeight = $($window).height() - 150,
+        fullPhotoSize = choosePhotoSize(photo, fullWidth, fullHeight),
+        inputFileLocation = {
+          _: 'inputFileLocation',
+          volume_id: fullPhotoSize.location.volume_id,
+          local_id: fullPhotoSize.location.local_id,
+          secret: fullPhotoSize.location.secret
+        };
+
+    if (window.chrome && chrome.fileSystem && chrome.fileSystem.chooseEntry) {
+
+      chrome.fileSystem.chooseEntry({
+        type: 'saveFile',
+        suggestedName: fileName,
+        accepts: [{
+          mimeTypes: [mimeType],
+          extensions: [ext]
+        }]
+      }, function (writableFileEntry) {
+        var downloadPromise = MtpApiFileManager.downloadFile(fullPhotoSize.location.dc_id, inputFileLocation, fullPhotoSize.size, {
+          mime: mimeType,
+          toFileEntry: writableFileEntry
+        });
+        downloadPromise.then(function (url) {
+          console.log('file save done');
+        }, function (e) {
+          console.log('photo download failed', e);
+        });
+
+      });
+    } else {
+      var downloadPromise = MtpApiFileManager.downloadFile(fullPhotoSize.location.dc_id, inputFileLocation, fullPhotoSize.size, {mime: mimeType});
+
+      downloadPromise.then(function (url) {
+
+        var a = $('<a>Download</a>')
+                  .css({position: 'absolute', top: 1, left: 1})
+                  .attr('href', url)
+                  .attr('target', '_blank')
+                  .attr('download', fileName)
+                  .appendTo('body');
+
+        a[0].dataset.downloadurl = [mimeType, fileName, url].join(':');
+        a[0].click();
+        $timeout(function () {
+          a.remove();
+        }, 100);
+      }, function (e) {
+        console.log('photo download failed', e);
+      });
+    }
+  };
+
   $rootScope.openPhoto = openPhoto;
 
 
@@ -2136,7 +2196,8 @@ angular.module('myApp.services', [])
     preloadPhoto: preloadPhoto,
     wrapForHistory: wrapForHistory,
     wrapForFull: wrapForFull,
-    openPhoto: openPhoto
+    openPhoto: openPhoto,
+    downloadPhoto: downloadPhoto
   }
 })
 
@@ -2268,7 +2329,10 @@ angular.module('myApp.services', [])
           extensions: [ext]
         }]
       }, function (writableFileEntry) {
-        var downloadPromise = MtpApiFileManager.downloadFile(video.dc_id, inputFileLocation, video.size, writableFileEntry, {mime: mimeType});
+        var downloadPromise = MtpApiFileManager.downloadFile(video.dc_id, inputFileLocation, video.size, {
+          mime: mimeType,
+          toFileEntry: writableFileEntry
+        });
         downloadPromise.then(function (url) {
           delete historyVideo.progress;
           console.log('file save done');
@@ -2280,7 +2344,7 @@ angular.module('myApp.services', [])
         historyVideo.progress.cancel = downloadPromise.cancel;
       });
     } else {
-      var downloadPromise = MtpApiFileManager.downloadFile(video.dc_id, inputFileLocation, video.size, null, {mime: mimeType});
+      var downloadPromise = MtpApiFileManager.downloadFile(video.dc_id, inputFileLocation, video.size, {mime: mimeType});
 
       downloadPromise.then(function (url) {
         delete historyVideo.progress;
@@ -2409,7 +2473,10 @@ angular.module('myApp.services', [])
           extensions: [ext]
         }]
       }, function (writableFileEntry) {
-        var downloadPromise = MtpApiFileManager.downloadFile(doc.dc_id, inputFileLocation, doc.size, writableFileEntry, {mime: doc.mime_type});
+        var downloadPromise = MtpApiFileManager.downloadFile(doc.dc_id, inputFileLocation, doc.size, {
+          mime: doc.mime_type,
+          toFileEntry: writableFileEntry
+        });
 
         downloadPromise.then(function (url) {
           delete historyDoc.progress;
@@ -2422,7 +2489,7 @@ angular.module('myApp.services', [])
         historyDoc.progress.cancel = downloadPromise.cancel;
       });
     } else {
-      var downloadPromise = MtpApiFileManager.downloadFile(doc.dc_id, inputFileLocation, doc.size, null, {mime: doc.mime_type});
+      var downloadPromise = MtpApiFileManager.downloadFile(doc.dc_id, inputFileLocation, doc.size, {mime: doc.mime_type});
 
       downloadPromise.then(function (url) {
         delete historyDoc.progress;
@@ -2501,7 +2568,7 @@ angular.module('myApp.services', [])
       $rootScope.$broadcast('history_update');
     }
 
-    var downloadPromise = MtpApiFileManager.downloadFile(audio.dc_id, inputFileLocation, audio.size, null, {mime: 'audio/ogg'});
+    var downloadPromise = MtpApiFileManager.downloadFile(audio.dc_id, inputFileLocation, audio.size, {mime: 'audio/ogg'});
 
     downloadPromise.then(function (url) {
       delete historyAudio.progress;
@@ -3266,7 +3333,7 @@ angular.module('myApp.services', [])
     if (typeof params === 'string') {
       params = {message: params};
     }
-    confirm(params.message).then(function (result) {
+    confirm(params).then(function (result) {
       callback(result || true)
     }, function () {
       callback(false)

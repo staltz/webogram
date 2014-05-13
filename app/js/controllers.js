@@ -1,5 +1,5 @@
 /*!
- * Webogram v0.0.21 - messaging web application for MTProto
+ * Webogram v0.1.1 - messaging web application for MTProto
  * https://github.com/zhukov/webogram
  * Copyright (C) 2014 Igor Zhukov <igor.beatle@gmail.com>
  * https://github.com/zhukov/webogram/blob/master/LICENSE
@@ -155,6 +155,15 @@ angular.module('myApp.controllers', [])
         }, function (error) {
           $scope.progress.enabled = false;
           switch (error.type) {
+            case 'NETWORK_BAD_REQUEST':
+              if (location.protocol == 'https:') {
+                ErrorService.confirm({type: 'HTTPS_MIXED_FAIL'}).then(function () {
+                  location = location.toString().replace(/^https:/, 'http:');
+                });
+                error.handled = true;
+              }
+              break;
+
             case 'PHONE_NUMBER_INVALID':
               $scope.error = {field: 'phone'};
               error.handled = true;
@@ -282,7 +291,7 @@ angular.module('myApp.controllers', [])
     }
   })
 
-  .controller('AppImDialogsController', function ($scope, $location, MtpApiManager, AppUsersManager, AppChatsManager, AppMessagesManager, AppPeersManager) {
+  .controller('AppImDialogsController', function ($scope, $location, MtpApiManager, AppUsersManager, AppChatsManager, AppMessagesManager, AppPeersManager, ErrorService) {
 
     // console.log('init controller');
 
@@ -374,6 +383,15 @@ angular.module('myApp.controllers', [])
         }
 
       }, function (error) {
+        if (error.type == 'NETWORK_BAD_REQUEST') {
+          if (location.protocol == 'https:') {
+            ErrorService.confirm({type: 'HTTPS_MIXED_FAIL'}).then(function () {
+              location = location.toString().replace(/^https:/, 'http:');
+            });
+            error.handled = true;
+          }
+        }
+
         if (error.code == 401) {
           MtpApiManager.logOut()['finally'](function () {
             $location.url('/login');
@@ -409,16 +427,18 @@ angular.module('myApp.controllers', [])
       }
 
       AppMessagesManager.getDialogs($scope.search.query, maxID).then(function (dialogsResult) {
-        offset += dialogsResult.dialogs.length;
-        maxID = dialogsResult.dialogs[dialogsResult.dialogs.length - 1].top_message;
-        hasMore = dialogsResult.count === null || offset < dialogsResult.count;
+        if (dialogsResult.dialogs.length) {
+          offset += dialogsResult.dialogs.length;
+          maxID = dialogsResult.dialogs[dialogsResult.dialogs.length - 1].top_message;
+          hasMore = dialogsResult.count === null || offset < dialogsResult.count;
 
-        angular.forEach(dialogsResult.dialogs, function (dialog) {
-          peersInDialogs[dialog.peerID] = true;
-          $scope.dialogs.push(AppMessagesManager.wrapForDialog(dialog.top_message, dialog.unread_count));
-        });
+          angular.forEach(dialogsResult.dialogs, function (dialog) {
+            peersInDialogs[dialog.peerID] = true;
+            $scope.dialogs.push(AppMessagesManager.wrapForDialog(dialog.top_message, dialog.unread_count));
+          });
 
-        $scope.$broadcast('ui_dialogs_append');
+          $scope.$broadcast('ui_dialogs_append');
+        }
       });
     };
 
@@ -1027,8 +1047,8 @@ angular.module('myApp.controllers', [])
 
     function updatePrevNext () {
       var index = list.indexOf($scope.messageID);
-      $scope.nav.hasNext = hasMore || index < list.length - 1;
-      $scope.nav.hasPrev = index > 0;
+      $scope.nav.hasNext = index > 0;
+      $scope.nav.hasPrev = hasMore || index < list.length - 1;
     };
 
     $scope.nav.next = function () {
@@ -1036,19 +1056,19 @@ angular.module('myApp.controllers', [])
         return false;
       }
 
-      movePosition(+1);
+      movePosition(-1);
     };
 
     $scope.nav.prev = function () {
       if (!$scope.nav.hasPrev) {
         return false;
       }
-      movePosition(-1);
+      movePosition(+1);
     };
 
     $scope.forward = function () {
       var messageID = $scope.messageID;
-      PeersSelectService.selectPeer({confirm_type: 'PHOTO_SHARE_PEER'}).then(function (peerString) {
+      PeersSelectService.selectPeer({confirm_type: 'FORWARD_PEER'}).then(function (peerString) {
         var peerID = AppPeersManager.getPeerID(peerString);
         AppMessagesManager.forwardMessages(peerID, [messageID]).then(function () {
           $rootScope.$broadcast('history_focus', {peerString: peerString});
@@ -1061,6 +1081,10 @@ angular.module('myApp.controllers', [])
       ErrorService.confirm({type: 'MESSAGE_DELETE'}).then(function () {
         AppMessagesManager.deleteMessages([messageID]);
       });
+    };
+
+    $scope.download = function () {
+      AppPhotosManager.downloadPhoto($scope.photoID);
     };
 
 
@@ -1097,7 +1121,7 @@ angular.module('myApp.controllers', [])
 
     $scope.forward = function () {
       var messageID = $scope.messageID;
-      PeersSelectService.selectPeer({confirm_type: 'VIDEO_SHARE_PEER'}).then(function (peerString) {
+      PeersSelectService.selectPeer({confirm_type: 'FORWARD_PEER'}).then(function (peerString) {
         var peerID = AppPeersManager.getPeerID(peerString);
         AppMessagesManager.forwardMessages(peerID, [messageID]).then(function () {
           $rootScope.$broadcast('history_focus', {peerString: peerString});
@@ -1536,8 +1560,11 @@ angular.module('myApp.controllers', [])
   })
 
   .controller('ContactsModalController', function ($scope, $modal, $modalInstance, AppUsersManager) {
+
     $scope.contacts = [];
     $scope.search = {};
+    $scope.slice = {limit: 20, limitDelta: 20}
+
 
     $scope.selectedContacts = {};
     $scope.disabledContacts = {};
@@ -1561,6 +1588,8 @@ angular.module('myApp.controllers', [])
     function updateContacts (query) {
       AppUsersManager.getContacts(query).then(function (contactsList) {
         $scope.contacts = [];
+        $scope.slice.limit = 20;
+
         angular.forEach(contactsList, function(userID) {
           var contact = {
             userID: userID,
@@ -1735,6 +1764,7 @@ angular.module('myApp.controllers', [])
   .controller('CountrySelectModalController', function ($scope, $modalInstance, $rootScope, SearchIndexManager) {
 
     $scope.search = {};
+    $scope.slice = {limit: 20, limitDelta: 20}
 
     var searchIndex = SearchIndexManager.createIndex();
 
@@ -1752,6 +1782,8 @@ angular.module('myApp.controllers', [])
       }
 
       $scope.countries = [];
+      $scope.slice.limit = 20;
+
       var j;
       for (var i = 0; i < Config.CountryCodes.length; i++) {
         if (!filtered || results[i]) {

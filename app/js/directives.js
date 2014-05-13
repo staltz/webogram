@@ -1,5 +1,5 @@
 /*!
- * Webogram v0.0.21 - messaging web application for MTProto
+ * Webogram v0.1.1 - messaging web application for MTProto
  * https://github.com/zhukov/webogram
  * Copyright (C) 2014 Igor Zhukov <igor.beatle@gmail.com>
  * https://github.com/zhukov/webogram/blob/master/LICENSE
@@ -312,7 +312,9 @@ angular.module('myApp.directives', ['myApp.filters'])
           moreNotified = false;
 
           $timeout(function () {
-            $(scrollableWrap).trigger('scroll');
+            if (scrollableWrap.scrollHeight != sh) {
+              $(scrollableWrap).trigger('scroll');
+            }
           });
         });
       });
@@ -831,7 +833,7 @@ angular.module('myApp.directives', ['myApp.filters'])
         }
       }
 
-      var downloadPromise = MtpApiFileManager.downloadFile($scope.video.dc_id, inputLocation, $scope.video.size, null, {mime: 'video/mp4'});
+      var downloadPromise = MtpApiFileManager.downloadFile($scope.video.dc_id, inputLocation, $scope.video.size, {mime: 'video/mp4'});
 
       downloadPromise.then(function (url) {
         $scope.progress.enabled = false;
@@ -1100,6 +1102,55 @@ angular.module('myApp.directives', ['myApp.filters'])
       });
     };
   })
+
+  .directive('myCustomBackground', function () {
+
+    return {
+      link: link
+    };
+
+    function link($scope, element, attrs) {
+
+      console.log(dT(), 'bg', attrs.myCustomBackground);
+      $('html').css({background: attrs.myCustomBackground});
+
+      $scope.$on('$destroy', function () {
+        $('html').css({background: ''});
+      });
+    };
+  })
+
+  .directive('myInfiniteScroller', function () {
+
+    return {
+      link: link,
+      scope: true
+    };
+
+    function link($scope, element, attrs) {
+
+      var scrollableWrap = $('.content', element)[0],
+          moreNotified = false;
+
+      $(scrollableWrap).on('scroll', function (e) {
+        if (!moreNotified &&
+            scrollableWrap.scrollTop >= scrollableWrap.scrollHeight - scrollableWrap.clientHeight - 300) {
+          moreNotified = true;
+          $scope.$apply(function () {
+            $scope.slice.limit += ($scope.slice.limitDelta || 20);
+          });
+
+          onContentLoaded(function () {
+            moreNotified = false;
+            $(element).nanoScroller();
+          });
+        }
+      });
+
+    };
+  })
+
+
 
 
   .directive('myModalPosition', function ($window, $timeout) {
