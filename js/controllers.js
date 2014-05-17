@@ -220,7 +220,7 @@ angular.module('myApp.controllers', [])
     };
   })
 
-  .controller('AppIMController', function ($scope, $location, $routeParams, $modal, $rootScope, $modalStack, MtpApiManager, AppUsersManager, ContactsSelectService, ErrorService) {
+  .controller('AppIMController', function ($scope, $location, $routeParams, $modal, $rootScope, $modalStack, MtpApiManager, AppUsersManager, ContactsSelectService, ErrorService, AppConfigManager) {
 
     $scope.$on('$routeUpdate', updateCurDialog);
 
@@ -233,6 +233,11 @@ angular.module('myApp.controllers', [])
       }
     });
 
+    AppConfigManager.get('theme_notdark').then(function (notDark) {
+        if (!notDark) {
+            $('body').addClass('dark-theme');
+        }
+    })
 
     $scope.isLoggedIn = true;
     $scope.openSettings = function () {
@@ -544,7 +549,7 @@ angular.module('myApp.controllers', [])
         curMessage = $scope.history[i];
         if (prevMessage &&
             curMessage.from_id == prevMessage.from_id &&
-            curMessage.date < prevMessage.date + 30 &&
+            curMessage.date < prevMessage.date + 300 &&
             !prevMessage.action &&
             !curMessage.action &&
             !prevMessage.fwd_from_id &&
@@ -1407,6 +1412,7 @@ angular.module('myApp.controllers', [])
     });
 
     $scope.notify = {};
+    $scope.theme = {};
     $scope.send = {};
 
     $scope.$watch('photo.file', onPhotoSelected);
@@ -1475,10 +1481,12 @@ angular.module('myApp.controllers', [])
       });
     };
 
-    AppConfigManager.get('notify_nodesktop', 'notify_nosound', 'send_ctrlenter').then(function (settings) {
+    AppConfigManager.get('notify_nodesktop', 'notify_nosound', 'send_ctrlenter', 'theme_notdark')
+    .then(function (settings) {
       $scope.notify.desktop = !settings[0];
       $scope.notify.sound = !settings[1];
       $scope.send.enter = settings[2] ? '' : '1';
+      $scope.theme.dark = !settings[3];
 
       $scope.$watch('notify.sound', function(newValue, oldValue) {
         if (newValue === oldValue) {
@@ -1500,6 +1508,17 @@ angular.module('myApp.controllers', [])
           AppConfigManager.remove('notify_nodesktop');
         } else {
           AppConfigManager.set({notify_nodesktop: true});
+        }
+      });
+
+      $scope.$watch('theme.dark', function(newValue, oldValue) {
+        if (newValue === oldValue) {
+          return false;
+        }
+        if (newValue) {
+          AppConfigManager.remove('theme_notdark');
+        } else {
+          AppConfigManager.set({theme_notdark: true});
         }
       });
 
