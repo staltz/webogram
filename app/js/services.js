@@ -2201,7 +2201,6 @@ angular.module('myApp.services', [])
   }
 })
 
-
 .service('AppVideoManager', function ($rootScope, $modal, $window, $timeout, MtpApiFileManager, AppUsersManager) {
   var videos = {};
   var videosForHistory = {};
@@ -2616,7 +2615,6 @@ angular.module('myApp.services', [])
   }
 })
 
-
 .service('ApiUpdatesManager', function ($rootScope, MtpNetworkerFactory, AppUsersManager, AppChatsManager, AppPeersManager, MtpApiManager) {
 
   var curState = {invalid: true};
@@ -2981,7 +2979,6 @@ angular.module('myApp.services', [])
 
 })
 
-
 .service('IdleManager', function ($rootScope, $window, $timeout) {
 
   $rootScope.idle = {isIDLE: false};
@@ -3279,7 +3276,6 @@ angular.module('myApp.services', [])
   }
 })
 
-
 .service('ErrorService', function ($rootScope, $modal, $window) {
 
   var shownBoxes = 0;
@@ -3347,8 +3343,6 @@ angular.module('myApp.services', [])
   }
 })
 
-
-
 .service('PeersSelectService', function ($rootScope, $modal) {
 
   function selectPeer (options) {
@@ -3370,7 +3364,6 @@ angular.module('myApp.services', [])
     selectPeer: selectPeer
   }
 })
-
 
 .service('ContactsSelectService', function ($rootScope, $modal) {
 
