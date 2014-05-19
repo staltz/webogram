@@ -3427,3 +3427,7 @@ body.dark-theme .im_dialogs_panel_dropdown .dropdown-toggle {
 body.dark-theme .im_dialogs_panel_dropdown .dropdown-toggle .icon-bar {
   background: #D3D0C8;
 }
+body.dark-theme .im_message_unread_split {
+  background: #393939;
+  color: #F2F0EC;
+}
