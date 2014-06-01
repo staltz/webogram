@@ -1,5 +1,5 @@
 /*!
- * Webogram v0.1.1 - messaging web application for MTProto
+ * Webogram v0.1.2 - messaging web application for MTProto
  * https://github.com/zhukov/webogram
  * Copyright (C) 2014 Igor Zhukov <igor.beatle@gmail.com>
  * https://github.com/zhukov/webogram/blob/master/LICENSE
@@ -411,7 +411,7 @@ angular.module('myApp.controllers', [])
         return;
       }
 
-      if (!hasMore && !$scope.search.query) {
+      if (!hasMore && $scope.search.query) {
         contactsShown = true;
 
         AppUsersManager.getContacts($scope.search.query).then(function (contactsList) {
@@ -485,6 +485,7 @@ angular.module('myApp.controllers', [])
           photos: 'inputMessagesFilterPhotos',
           video: 'inputMessagesFilterVideo',
           documents: 'inputMessagesFilterDocument',
+          audio: 'inputMessagesFilterAudio'
         },
         jump = 0;
 
@@ -617,6 +618,7 @@ angular.module('myApp.controllers', [])
         updateHistoryPeer();
         safeReplaceObject($scope.state, {loaded: true});
 
+        $scope.history = [];
         angular.forEach(historyResult.history, function (id) {
           $scope.history.push(AppMessagesManager.wrapForHistory(id));
         });
@@ -917,9 +919,18 @@ angular.module('myApp.controllers', [])
           return all;
         });
 
+        var timeout = 0;
         do {
-          AppMessagesManager.sendText($scope.curDialog.peerID, text.substr(0, 4096));
+
+          (function (peerID, curText, curTimeout) {
+            setTimeout(function () {
+              AppMessagesManager.sendText(peerID, curText);
+            }, curTimeout)
+          })($scope.curDialog.peerID, text.substr(0, 4096), timeout);
+
           text = text.substr(4096);
+          timeout += 100;
+
         } while (text.length);
 
         resetDraft();
@@ -1481,35 +1492,58 @@ angular.module('myApp.controllers', [])
       });
     };
 
-    AppConfigManager.get('notify_nodesktop', 'notify_nosound', 'send_ctrlenter', 'theme_notdark')
+    AppConfigManager.get('notify_nodesktop', 'notify_nosound', 'send_ctrlenter', 'notify_volume', 'theme_notdark')
     .then(function (settings) {
       $scope.notify.desktop = !settings[0];
-      $scope.notify.sound = !settings[1];
       $scope.send.enter = settings[2] ? '' : '1';
       $scope.theme.dark = !settings[3];
 
-      $scope.$watch('notify.sound', function(newValue, oldValue) {
-        if (newValue === oldValue) {
-          return false;
-        }
-        if (newValue) {
-          AppConfigManager.remove('notify_nosound');
+      if (settings[1]) {
+        $scope.notify.volume = 0;
+      } else if (settings[3] !== false) {
+        $scope.notify.volume = settings[3] > 0 && Math.ceil(settings[3] * 10) || 0;
+      } else {
+        $scope.notify.volume = 5;
+      }
+
+      $scope.notify.volumeOf4 = function () {
+        return 1 + Math.ceil(($scope.notify.volume - 1) / 3.3);
+      };
+
+      $scope.toggleSound = function () {
+        if ($scope.notify.volume) {
+          $scope.notify.volume = 0;
         } else {
-          AppConfigManager.set({notify_nosound: true});
+          $scope.notify.volume = 5;
+        }
+      }
+
+      var testSoundPromise;
+      $scope.$watch('notify.volume', function (newValue, oldValue) {
+        if (newValue !== oldValue) {
+          var storeVolume = newValue / 10;
+          AppConfigManager.set({notify_volume: storeVolume});
+          AppConfigManager.remove('notify_nosound');
           NotificationsManager.clear();
+
+          if (testSoundPromise) {
+            $timeout.cancel(testSoundPromise);
+          }
+          testSoundPromise = $timeout(function () {
+            NotificationsManager.testSound(storeVolume);
+          }, 500);
         }
       });
 
-      $scope.$watch('notify.desktop', function(newValue, oldValue) {
-        if (newValue === oldValue) {
-          return false;
-        }
-        if (newValue) {
+      $scope.toggleDesktop = function () {
+        $scope.notify.desktop = !$scope.notify.desktop;
+
+        if ($scope.notify.desktop) {
           AppConfigManager.remove('notify_nodesktop');
         } else {
           AppConfigManager.set({notify_nodesktop: true});
         }
-      });
+      }
 
       $scope.$watch('theme.dark', function(newValue, oldValue) {
         if (newValue === oldValue) {
@@ -1522,17 +1556,16 @@ angular.module('myApp.controllers', [])
         }
       });
 
-      $scope.$watch('send.enter', function(newValue, oldValue) {
-        if (newValue === oldValue) {
-          return false;
-        }
-        if (newValue) {
+      $scope.toggleCtrlEnter = function (newValue) {
+        $scope.send.enter = newValue;
+
+        if ($scope.send.enter) {
           AppConfigManager.remove('send_ctrlenter');
         } else {
           AppConfigManager.set({send_ctrlenter: true});
         }
         $rootScope.$broadcast('settings_changed');
-      });
+      }
     });
   })
 
