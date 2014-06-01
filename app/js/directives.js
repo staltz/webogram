@@ -1,5 +1,5 @@
 /*!
- * Webogram v0.1.1 - messaging web application for MTProto
+ * Webogram v0.1.2 - messaging web application for MTProto
  * https://github.com/zhukov/webogram
  * Copyright (C) 2014 Igor Zhukov <igor.beatle@gmail.com>
  * https://github.com/zhukov/webogram/blob/master/LICENSE
@@ -491,6 +491,7 @@ angular.module('myApp.directives', ['myApp.filters'])
 
           if (submit) {
             $(element).trigger('submit');
+            $(element).trigger('message_send');
             return cancelEvent(e);
           }
         }
@@ -922,7 +923,6 @@ angular.module('myApp.directives', ['myApp.filters'])
           console.log('dl progress', progress);
           $scope.document.progress.done = progress.done;
           $scope.document.progress.percent = Math.max(1, Math.floor(100 * progress.done / progress.total));
-          $rootScope.$broadcast('history_update');
         })
       }
     }

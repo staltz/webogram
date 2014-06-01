@@ -1,5 +1,5 @@
 /*!
- * Webogram v0.1.1 - messaging web application for MTProto
+ * Webogram v0.1.2 - messaging web application for MTProto
  * https://github.com/zhukov/webogram
  * Copyright (C) 2014 Igor Zhukov <igor.beatle@gmail.com>
  * https://github.com/zhukov/webogram/blob/master/LICENSE
@@ -931,6 +931,10 @@ angular.module('myApp.services', [])
           case 'inputMessagesFilterDocument':
             neededContents['messageMediaDocument'] = true;
             break;
+
+          case 'inputMessagesFilterAudio':
+            neededContents['messageMediaAudio'] = true;
+            break;
         }
         for (i = 0; i < historyStorage.history.length; i++) {
           message = messagesStorage[historyStorage.history[i]];
@@ -1196,9 +1200,6 @@ angular.module('myApp.services', [])
           message: text,
           random_id: randomID
         }, sentRequestOptions).then(function (result) {
-          if (pendingAfterMsgs[peerID] === sentRequestOptions) {
-            delete pendingAfterMsgs[peerID];
-          }
           if (ApiUpdatesManager.saveSeq(result.seq)) {
             ApiUpdatesManager.saveUpdate({
               _: 'updateMessageID',
@@ -1216,6 +1217,10 @@ angular.module('myApp.services', [])
           }
         }, function (error) {
           toggleError(true);
+        })['finally'](function () {
+          if (pendingAfterMsgs[peerID] === sentRequestOptions) {
+            delete pendingAfterMsgs[peerID];
+          }
         });
 
         pendingAfterMsgs[peerID] = sentRequestOptions;
@@ -1480,6 +1485,8 @@ angular.module('myApp.services', [])
   }
 
   function forwardMessages (peerID, msgIDs) {
+    msgIDs = $filter('orderBy')(msgIDs);
+
     return MtpApiManager.invokeApi('messages.forwardMessages', {
       peer: AppPeersManager.getInputPeerByID(peerID),
       id: msgIDs
@@ -3131,7 +3138,8 @@ angular.module('myApp.services', [])
     getPeerSettings: getPeerSettings,
     getPeerMuted: getPeerMuted,
     savePeerSettings: savePeerSettings,
-    updatePeerSettings: updatePeerSettings
+    updatePeerSettings: updatePeerSettings,
+    testSound: playSound
   };
 
   function getPeerSettings (peerID) {
@@ -3207,9 +3215,9 @@ angular.module('myApp.services', [])
       return false;
     }
 
-    AppConfigManager.get('notify_nosound').then(function (noSound) {
-      if (!noSound) {
-        playSound();
+    AppConfigManager.get('notify_nosound', 'notify_volume').then(function (settings) {
+      if (!settings[0] && settings[1] === false || settings[1] > 0) {
+        playSound(settings[1] || 0.5);
       }
     })
 
@@ -3248,9 +3256,13 @@ angular.module('myApp.services', [])
     });
   };
 
-  function playSound () {
+  function playSound (volume) {
     var filename = 'img/sound_a.wav';
-    $('#notify_sound').html('<audio autoplay="autoplay"><source src="' + filename + '" type="audio/mpeg" /><embed hidden="true" autostart="true" loop="false" src="' + filename +'" /></audio>');
+    var obj = $('#notify_sound').html('<audio autoplay="autoplay">' +
+        '<source src="' + filename + '" type="audio/mpeg" />' +
+        '<embed hidden="true" autostart="true" loop="false" volume="' + (volume * 100) +'" src="' + filename +'" />' +
+        '</audio>');
+    obj.find('audio')[0].volume = volume;
   }
 
   function notificationCancel (key) {
