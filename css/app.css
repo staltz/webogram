@@ -3485,20 +3485,23 @@ body.dark-theme .tg_page_head .navbar-inverse .navbar-nav > li > a:hover {
   color: #F2F0EC;
 }
 body.dark-theme .btn-success {
-  color: #448942;
-  background-color: #98CD97;
-  border-color: #98CD97;
+  color: #6498CE;
+  background-color: rgba(0,0,0,0);
+  border-color: #6498CE;
+}
+body.dark-theme .btn-success:hover,
+body.dark-theme .btn-success:focus,
+body.dark-theme .btn-success:active,
+body.dark-theme .btn-success.active {
+  color: white;
+  background-color: #6498CE;
+  border-color: #6498CE;
 }
 body.dark-theme .im_dialog_unread,
 body.dark-theme a.im_dialog:hover .im_dialog_unread,
 body.dark-theme .active .im_dialog_unread {
   background: #6498CE;
 }
-
-body.dark-theme .btn-success:hover,
-body.dark-theme .btn-success:focus,
-body.dark-theme .btn-success:active,
-body.dark-theme .btn-success.active,
 body.dark-theme .open .dropdown-toggle.btn-success {
   color: #448942;
   background-color: #76BC74;
