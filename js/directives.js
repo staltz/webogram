@@ -1,5 +1,5 @@
 /*!
- * Webogram v0.1.2 - messaging web application for MTProto
+ * Webogram v0.1.6 - messaging web application for MTProto
  * https://github.com/zhukov/webogram
  * Copyright (C) 2014 Igor Zhukov <igor.beatle@gmail.com>
  * https://github.com/zhukov/webogram/blob/master/LICENSE
@@ -29,6 +29,145 @@ angular.module('myApp.directives', ['myApp.filters'])
     };
   })
 
+  .directive('myDialogs', function ($modalStack, $transition) {
+
+    return {
+      link: link
+    };
+
+
+    function link ($scope, element, attrs) {
+      var dialogsWrap = $('.im_dialogs_wrap', element)[0],
+          scrollableWrap = $('.im_dialogs_scrollable_wrap', element)[0],
+          searchField = $('.im_dialogs_search_field', element)[0],
+          tabsWrap = $('.im_dialogs_tabs_wrap', element)[0],
+          searchFocused = false;
+
+
+      $(searchField).on('focus blur', function (e) {
+        searchFocused = e.type == 'focus';
+
+        if (!searchFocused) {
+          $(scrollableWrap).find('.im_dialog_selected').removeClass('im_dialog_selected');
+        }
+      });
+
+      attrs.$observe('hasTabs', function (newValue) {
+        newValue = newValue == 'true';
+        $(tabsWrap).toggle(newValue);
+        $scope.$broadcast('ui_dialogs_tabs', newValue);
+      });
+
+      $(document).on('keydown', onKeyDown);
+
+      $scope.$on('$destroy', function () {
+        $(document).off('keydown', onKeyDown);
+      });
+
+
+      function onKeyDown(e) {
+        if (!searchFocused && $modalStack.getTop()) {
+          return true;
+        }
+
+        if (e.keyCode == 36 &&  !e.shiftKey && !e.ctrlKey && e.altKey) { // Alt + Home
+          var currentSelected = $(scrollableWrap).find('.im_dialog_wrap a')[0];
+          if (currentSelected) {
+            currentSelected.click();
+            scrollableWrap.scrollTop = 0;
+            $(dialogsWrap).nanoScroller({flash: true});
+          }
+          return cancelEvent(e);
+        }
+
+        if (e.keyCode == 27 || e.keyCode == 9 && e.shiftKey && !e.ctrlKey && !e.metaKey) { // ESC or Shift + Tab
+          if (!searchFocused) {
+            searchField.focus();
+            if (searchField.value) {
+              searchField.select();
+            }
+          }
+          return cancelEvent(e);
+        }
+
+        if (searchFocused && e.keyCode == 13) { // Enter
+          var currentSelected = $(scrollableWrap).find('.im_dialog_selected')[0] || $(scrollableWrap).find('.im_dialog_wrap a')[0];
+          if (currentSelected) {
+            currentSelected.click();
+          }
+          return cancelEvent(e);
+        }
+
+        if (e.keyCode == 38 || e.keyCode == 40) { // UP, DOWN
+          var skip = !e.shiftKey && e.altKey;
+          if (!skip && (!searchFocused || e.metaKey)) {
+            return true;
+          }
+
+          var next = e.keyCode == 40,
+              currentSelected = !skip && $(scrollableWrap).find('.im_dialog_selected')[0] || $(scrollableWrap).find('.active a.im_dialog')[0],
+              currentSelectedWrap = currentSelected && currentSelected.parentNode,
+              nextDialogWrap;
+
+          if (currentSelectedWrap) {
+            var nextDialogWrap = currentSelected[next ? 'nextSibling' : 'previousSibling'];
+
+            if (!nextDialogWrap || !nextDialogWrap.className || nextDialogWrap.className.indexOf('im_dialog_wrap') == -1) {
+              var dialogWraps = $(scrollableWrap).find('.im_dialog_wrap'),
+                  pos = dialogWraps.index(currentSelected.parentNode),
+                  nextPos = pos + (next ? 1 : -1);
+
+              nextDialogWrap = dialogWraps[nextPos];
+            }
+          } else {
+            var dialogWraps = $(scrollableWrap).find('.im_dialog_wrap');
+            if (next) {
+              nextDialogWrap = dialogWraps[0];
+            } else {
+              nextDialogWrap = dialogWraps[dialogWraps.length - 1];
+            }
+          }
+
+          if (skip) {
+            if (nextDialogWrap) {
+              $(nextDialogWrap).find('a')[0].click();
+            }
+          } else {
+            if (currentSelectedWrap && nextDialogWrap) {
+              $(currentSelectedWrap).find('a').removeClass('im_dialog_selected');
+            }
+            if (nextDialogWrap) {
+              $(nextDialogWrap).find('a').addClass('im_dialog_selected');
+            }
+          }
+
+          if (nextDialogWrap) {
+            var elTop = nextDialogWrap.offsetTop,
+                elHeight = nextDialogWrap.offsetHeight,
+                scrollTop = scrollableWrap.scrollTop,
+                viewportHeight = scrollableWrap.clientHeight;
+
+
+            if (scrollTop > elTop) {
+              scrollableWrap.scrollTop = elTop;
+              $(dialogsWrap).nanoScroller({flash: true});
+            }
+            else if (scrollTop < elTop + elHeight - viewportHeight) {
+              scrollableWrap.scrollTop = elTop + elHeight - viewportHeight;
+              $(dialogsWrap).nanoScroller({flash: true});
+            }
+
+          }
+
+          return cancelEvent(e);
+        }
+      }
+
+    }
+
+
+  })
+
   .directive('myDialogsList', function($window, $timeout) {
 
     return {
@@ -41,6 +180,7 @@ angular.module('myApp.directives', ['myApp.filters'])
           scrollableWrap = $('.im_dialogs_scrollable_wrap', element)[0],
           headWrap = $('.tg_page_head')[0],
           footer = $('.im_page_footer')[0],
+          hasTabs = false,
           moreNotified = false;
 
       onContentLoaded(function () {
@@ -54,6 +194,11 @@ angular.module('myApp.directives', ['myApp.filters'])
       }
 
       $scope.$on('ui_dialogs_prepend', updateScroller);
+
+      $scope.$on('ui_dialogs_tabs', function (e, newHasTabs) {
+        hasTabs = newHasTabs;
+        updateSizes();
+      })
 
 
       $scope.$on('ui_dialogs_append', function () {
@@ -104,7 +249,7 @@ angular.module('myApp.directives', ['myApp.filters'])
           footer = $('.im_page_footer')[0];
         }
         $(element).css({
-          height: $($window).height() - footer.offsetHeight - (headWrap ? headWrap.offsetHeight : 44) - 72
+          height: $($window).height() - footer.offsetHeight - (headWrap ? headWrap.offsetHeight : 44) - (hasTabs ? 38 : 0) - 68
         });
 
         updateScroller();
@@ -198,7 +343,8 @@ angular.module('myApp.directives', ['myApp.filters'])
           headWrap = $('.tg_page_head')[0],
           footer = $('.im_page_footer')[0],
           sendForm = $('.im_send_form', element)[0],
-          moreNotified = false;
+          moreNotified = false,
+          lessNotified = false;
 
       onContentLoaded(function () {
         scrollableWrap.scrollTop = scrollableWrap.scrollHeight;
@@ -206,6 +352,7 @@ angular.module('myApp.directives', ['myApp.filters'])
       });
 
       var updateScroller = function (delay) {
+        // console.trace('scroller update', delay);
         $timeout(function () {
           if (!$(scrollableWrap).hasClass('im_history_to_bottom')) {
             $(historyWrap).nanoScroller();
@@ -226,7 +373,7 @@ angular.module('myApp.directives', ['myApp.filters'])
       var animated = transform ? true : false,
           curAnimation = false;
 
-      $scope.$on('ui_history_append', function (e, options) {
+      $scope.$on('ui_history_append_new', function (e, options) {
         if (!atBottom && !options.my) {
           return;
         }
@@ -261,6 +408,24 @@ angular.module('myApp.directives', ['myApp.filters'])
         });
       });
 
+      function changeScroll () {
+        var unreadSplit, focusMessage;
+
+        if (focusMessage = $('.im_message_focus', scrollableWrap)[0]) {
+          scrollableWrap.scrollTop = Math.max(0, focusMessage.offsetTop - Math.floor(scrollableWrap.clientHeight / 2) + 26);
+          atBottom = false;
+        } else if (unreadSplit = $('.im_message_unread_split', scrollableWrap)[0]) {
+          scrollableWrap.scrollTop = Math.max(0, unreadSplit.offsetTop - 52);
+          atBottom = false;
+        } else {
+          scrollableWrap.scrollTop = scrollableWrap.scrollHeight;
+        }
+        updateScroller();
+        $timeout(function () {
+          $(scrollableWrap).trigger('scroll');
+        });
+      };
+
       $scope.$on('ui_history_change', function () {
         $(scrollableWrap).addClass('im_history_to_bottom');
         $(scrollable).css({bottom: 0});
@@ -268,22 +433,14 @@ angular.module('myApp.directives', ['myApp.filters'])
           $(scrollableWrap).removeClass('im_history_to_bottom');
           $(scrollable).css({bottom: ''});
           updateSizes(true);
-
-          var unreadSplit = $('.im_message_unread_split', scrollableWrap);
-          if (unreadSplit[0]) {
-            scrollableWrap.scrollTop = Math.max(0, unreadSplit[0].offsetTop - 52);
-            atBottom = false;
-          } else {
-            scrollableWrap.scrollTop = scrollableWrap.scrollHeight;
-          }
-
-          updateScroller();
           moreNotified = false;
-
-          $timeout(function () {
-            $(scrollableWrap).trigger('scroll');
-          });
+          lessNotified = false;
+          changeScroll();
         });
+      });
+
+      $scope.$on('ui_history_change_scroll', function () {
+        onContentLoaded(changeScroll)
       });
 
       $scope.$on('ui_history_focus', function () {
@@ -310,6 +467,21 @@ angular.module('myApp.directives', ['myApp.filters'])
 
           updateBottomizer();
           moreNotified = false;
+
+          $timeout(function () {
+            if (scrollableWrap.scrollHeight != sh) {
+              $(scrollableWrap).trigger('scroll');
+            }
+          });
+        });
+      });
+
+      $scope.$on('ui_history_append', function () {
+        var sh = scrollableWrap.scrollHeight;
+        onContentLoaded(function () {
+          atBottom = false;
+          updateBottomizer();
+          lessNotified = false;
 
           $timeout(function () {
             if (scrollableWrap.scrollHeight != sh) {
@@ -361,6 +533,10 @@ angular.module('myApp.directives', ['myApp.filters'])
         if (!moreNotified && scrollableWrap.scrollTop <= 300) {
           moreNotified = true;
           $scope.$emit('history_need_more');
+        }
+        else if (!lessNotified && scrollableWrap.scrollTop >= scrollableWrap.scrollHeight - scrollableWrap.clientHeight - 300) {
+          lessNotified = true;
+          $scope.$emit('history_need_less');
         }
       });
 
@@ -417,7 +593,7 @@ angular.module('myApp.directives', ['myApp.filters'])
 
   })
 
-  .directive('mySendForm', function ($timeout, AppConfigManager, ErrorService) {
+  .directive('mySendForm', function ($timeout, $modalStack, AppConfigManager, ErrorService) {
 
     return {
       link: link,
@@ -492,21 +668,37 @@ angular.module('myApp.directives', ['myApp.filters'])
           if (submit) {
             $(element).trigger('submit');
             $(element).trigger('message_send');
+            resetAfterSubmit();
             return cancelEvent(e);
           }
         }
 
       });
 
-      var lastTyping = 0;
-      $(editorElement).on('keyup', function (e) {
-        var now = tsNow();
-        if (now - lastTyping < 5000) {
-          return;
-        }
-        lastTyping = now;
-        $scope.$emit('ui_typing');
+      $('.im_submit', element).on('mousedown', function (e) {
+        $(element).trigger('submit');
+        $(element).trigger('message_send');
+        resetAfterSubmit();
+        return cancelEvent(e);
       });
+
+      var lastTyping = 0,
+          lastLength;
+      $(editorElement).on('keyup', function (e) {
+        var now = tsNow(),
+            length = (editorElement[richTextarea ? 'innerText' : 'value']).length;
+
+        if (now - lastTyping > 5000 && length != lastLength) {
+          lastTyping = now;
+          lastLength = length;
+          $scope.$emit('ui_typing');
+        }
+      });
+
+      function resetAfterSubmit () {
+        lastTyping = 0;
+        lastLength = 0;
+      };
 
       function updateField () {
         if (richTextarea) {
@@ -534,16 +726,28 @@ angular.module('myApp.directives', ['myApp.filters'])
         }
       };
 
+      function onKeyDown(e) {
+        if (e.keyCode == 9 && !e.shiftKey && !e.ctrlKey && !e.metaKey && !$modalStack.getTop()) { // TAB
+          editorElement.focus();
+          return cancelEvent(e);
+        }
+      }
+      $(document).on('keydown', onKeyDown);
+
       $('body').on('dragenter dragleave dragover drop', onDragDropEvent);
       $(document).on('paste', onPasteEvent);
       if (richTextarea) {
         $(richTextarea).on('DOMNodeInserted', onPastedImageEvent);
       }
 
-      $scope.$on('ui_peer_change', focusField);
-      $scope.$on('ui_history_focus', focusField);
-      $scope.$on('ui_history_change', focusField);
+      if (!Config.Navigator.mobile) {
+        $scope.$on('ui_peer_change', focusField);
+        $scope.$on('ui_history_focus', focusField);
+        $scope.$on('ui_history_change', focusField);
+      }
+
       $scope.$on('ui_message_send', focusField);
+
       $scope.$on('ui_peer_draft', updateField);
       $scope.$on('ui_message_before_send', updateValue);
 
@@ -551,12 +755,15 @@ angular.module('myApp.directives', ['myApp.filters'])
       $scope.$on('$destroy', function cleanup() {
         $('body').off('dragenter dragleave dragover drop', onDragDropEvent);
         $(document).off('paste', onPasteEvent);
+        $(document).off('keydown', onKeyDown);
         if (richTextarea) {
           $(richTextarea).off('DOMNodeInserted', onPastedImageEvent);
         }
       });
 
-      focusField();
+      if (!Config.Navigator.mobile) {
+        focusField();
+      }
 
       function focusField () {
         onContentLoaded(function () {
@@ -679,6 +886,7 @@ angular.module('myApp.directives', ['myApp.filters'])
         if ($scope.thumb && $scope.thumb.width && $scope.thumb.height) {
           element.attr('width', $scope.thumb.width);
           element.attr('height', $scope.thumb.height);
+          $scope.$emit('ui_height');
         }
         // console.log('new loc', newLocation, arguments);
         var counterSaved = ++counter;
@@ -842,6 +1050,7 @@ angular.module('myApp.directives', ['myApp.filters'])
         $scope.player.hasQuicktime = hasQt;
         $scope.player.quicktime = false;
         $scope.player.src = $sce.trustAsResourceUrl(url);
+        $scope.$emit('ui_height');
       }, function (e) {
         console.log('Download video failed', e, $scope.video);
         $scope.progress.enabled = false;
@@ -856,6 +1065,8 @@ angular.module('myApp.directives', ['myApp.filters'])
       }, function (progress) {
         $scope.progress.percent = Math.max(1, Math.floor(100 * progress.done / progress.total));
       });
+
+      $scope.$emit('ui_height');
 
       $scope.$on('$destroy', function () {
         downloadPromise.cancel();
@@ -1010,6 +1221,9 @@ angular.module('myApp.directives', ['myApp.filters'])
   .directive('myFocused', function(){
     return {
       link: function($scope, element, attrs) {
+        if (Config.Navigator.mobile) {
+          return false;
+        }
         setTimeout(function () {
           element[0].focus();
         }, 100);
@@ -1021,6 +1235,9 @@ angular.module('myApp.directives', ['myApp.filters'])
     return {
       link: function($scope, element, attrs) {
         $scope.$on(attrs.myFocusOn, function () {
+          if (Config.Navigator.mobile) {
+            return false;
+          }
           onContentLoaded(function () {
             element[0].focus();
           });
