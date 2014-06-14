@@ -4,7 +4,7 @@
 
   <div class="im_page_split clearfix">
 
-    <div class="im_dialogs_col_wrap" ng-controller="AppImDialogsController">
+    <div class="im_dialogs_col_wrap" ng-controller="AppImDialogsController" my-dialogs has-tabs="{{search.query.length > 0}}">
       <div class="im_dialogs_panel">
         <div class="dropdown im_dialogs_panel_dropdown pull-right">
           <a class="dropdown-toggle">
@@ -13,22 +13,45 @@
             <span class="icon-bar"></span>
           </a>
           <ul class="dropdown-menu">
-            <li><a href="" ng-click="openGroup()">New Group</a></li>
-            <li><a href="" ng-click="openContacts()">Contacts</a></li>
-            <li><a href="" ng-click="openSettings()">Settings</a></li>
+            <li><a ng-click="openGroup()">New Group</a></li>
+            <li><a ng-click="importContact()">New Contact</a></li>
+            <li><a ng-click="openContacts()">Contacts</a></li>
+            <li><a ng-click="openSettings()">Settings</a></li>
           </ul>
         </div>
         <div class="im_dialogs_search">
           <input class="form-control im_dialogs_search_field" type="search" placeholder="Search" ng-model="search.query"/>
           <a class="im_dialogs_search_clear" ng-click="search.query = ''" ng-show="search.query.length"></a>
         </div>
+
+        <div class="im_dialogs_tabs_wrap">
+          <div class="im_dialogs_tabs clearfix">
+            <a href="" class="im_dialogs_tab" ng-class="{active: !search.messages}" ng-click="search.messages = false">Conversations</a>
+            <a href="" class="im_dialogs_tab" ng-class="{active: search.messages}" ng-click="search.messages = true">Messages</a>
+          </div>
+        </div>
       </div>
+
       <div my-dialogs-list class="im_dialogs_col">
         <div class="im_dialogs_wrap nano">
           <div class="im_dialogs_scrollable_wrap content">
-            <ul class="nav nav-pills nav-stacked">
-              <li class="im_dialog_wrap" my-dialog dialog-message="dialogMessage" ng-repeat="dialogMessage in dialogs track by dialogMessage.peerID" ng-class="{active: curDialog.peerID == dialogMessage.peerID}"></li>
-            </ul>
+
+            <div class="im_dialogs_empty_wrap" ng-if="isEmpty.contacts">
+              <h3 class="im_dialogs_empty_header">No contacts yet</h3>
+              <p class="im_dialogs_empty_lead">Get started by adding a contact to chat with</p>
+              <button type="button" class="btn btn-primary btn-sm" ng-click="importContact()">Add contact</button>
+              <button ng-if="phonebookAvailable" type="button" class="btn btn-primary btn-sm im_dialogs_import_phonebook" ng-click="importPhonebook()">Import phonebook</button>
+            </div>
+
+            <div ng-switch="search.messages">
+              <ul ng-switch-when="true" class="nav nav-pills nav-stacked">
+                <li class="im_dialog_wrap" my-dialog dialog-message="dialogMessage" ng-repeat="dialogMessage in dialogs track by dialogMessage.id" ng-class="{active: curDialog.peerID == dialogMessage.peerID &amp;&amp; curDialog.messageID == dialogMessage.id}"></li>
+              </ul>
+              <ul ng-switch-default class="nav nav-pills nav-stacked">
+                <li class="im_dialog_wrap" my-dialog dialog-message="dialogMessage" ng-repeat="dialogMessage in dialogs track by dialogMessage.peerID" ng-class="{active: curDialog.peerID == dialogMessage.peerID}"></li>
+              </ul>
+            </div>
+
             <div class="im_dialogs_contacts_wrap" ng-show="contacts.length > 0">
               <h5>Contacts</h5>
               <ul class="nav nav-pills nav-stacked">
@@ -46,21 +69,29 @@
                         <span class="im_dialog_user" ng-bind-html="contact.user.rFullName"></span>
                       </div>
                       <div class="im_dialog_message">
-                        <span class="im_dialog_message_text">{{contact.user | userStatus}}</span>
+                        <span class="im_dialog_message_text" ng-bind="contact.user | userStatus"></span>
                       </div>
                     </div>
                   </a>
                 </li>
               </ul>
             </div>
+
           </div>
         </div>
       </div>
     </div>
 
     <div class="im_history_col_wrap" ng-controller="AppImHistoryController">
-      <div ng-show="state.notSelected" class="im_history_not_selected" my-vertical-position="0.35">
-        Please select a chat to start messaging
+      <div ng-show="state.notSelected" ng-switch="isEmpty.contacts &amp;&amp; isEmpty.dialogs">
+        <div ng-switch-when="true" class="im_history_no_dialogs_wrap">
+          <h3 class="im_dialogs_empty_header">Get started</h3>
+          <p class="im_dialogs_empty_lead">Welcome to Telegram Web. You can always set your profile photo and change your name in Settings.</p>
+          <button type="button" class="btn btn-primary btn-sm" ng-click="openSettings()">Open Settings</button>
+        </div>
+        <div ng-switch-default class="im_history_not_selected" my-vertical-position="0.35">
+          Please select a chat to start messaging
+        </div>
       </div>
       <div ng-show="!state.notSelected &amp;&amp; !state.loaded" class="im_history_not_selected" my-vertical-position="0.35">
         Loading history<span my-loading-dots></span>
@@ -86,9 +117,10 @@
                     <li><a ng-click="toggleMedia('audio')">Voice messages</a></li>
                   </ul>
                 </div>
-                <a ng-show="mediaType !== false" class="im_history_panel_return_link pull-right" ng-click="toggleMedia()">
-                  Show all messages
-                  <strong class="im_history_panel_return_count" ng-show="missedCount > 0">+{{missedCount}}</strong>
+                <a ng-show="mediaType !== false || skippedHistory" class="im_history_panel_return_link pull-right" ng-click="returnToRecent()" ng-switch="skippedHistory">
+                  <span ng-switch-when="true">Show recent messages</span>
+                  <span ng-switch-default>Show all messages</span>
+                  <strong class="im_history_panel_return_count" ng-show="missedCount > 0" ng-bind="'+' + missedCount"></strong>
                 </a>
 
                 <div ng-switch="mediaType">
@@ -100,7 +132,7 @@
                   <h4 ng-switch-default ng-switch="historyPeer.id > 0" ng-click="showPeerInfo()">
                     <div ng-switch-when="true">
                       <span ng-bind-html="historyPeer.data.rFullName"></span>
-                      <small class="im_peer_online">{{historyPeer.data | userStatus}}</small>
+                      <small class="im_peer_online" ng-bind="historyPeer.data | userStatus"></small>
                     </div>
                     <div ng-switch-default>
                       <span ng-bind-html="historyPeer.data.rTitle"></span>

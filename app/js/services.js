@@ -1,5 +1,5 @@
 /*!
- * Webogram v0.1.2 - messaging web application for MTProto
+ * Webogram v0.1.6 - messaging web application for MTProto
  * https://github.com/zhukov/webogram
  * Copyright (C) 2014 Igor Zhukov <igor.beatle@gmail.com>
  * https://github.com/zhukov/webogram/blob/master/LICENSE
@@ -12,7 +12,7 @@
 angular.module('myApp.services', [])
 
 .service('AppConfigManager', function ($q) {
-  var testPrefix = window._testMode ? 't_' : '';
+  var testPrefix = Config.Modes.test ? 't_' : '';
   var cache = {};
   var useCs = !!(window.chrome && chrome.storage && chrome.storage.local);
   var useLs = !useCs && !!window.localStorage;
@@ -130,7 +130,7 @@ angular.module('myApp.services', [])
   };
 })
 
-.service('AppUsersManager', function ($rootScope, $modal, $modalStack, $filter, MtpApiFileManager, MtpApiManager, RichTextProcessor, SearchIndexManager) {
+.service('AppUsersManager', function ($rootScope, $modal, $modalStack, $filter, $q, MtpApiFileManager, MtpApiManager, RichTextProcessor, SearchIndexManager, ErrorService) {
   var users = {},
       cachedPhotoLocations = {},
       contactsFillPromise,
@@ -307,7 +307,39 @@ angular.module('myApp.services', [])
         onContactUpdated(foundUserID = importedContact.user_id, true);
       });
 
-      return foundUserID;
+      return foundUserID ? 1 : 0;
+    });
+  };
+
+  function importContacts (contacts) {
+    var inputContacts = [],
+        i, j;
+
+    for (i = 0; i < contacts.length; i++) {
+      for (j = 0; j < contacts[i].phones.length; j++) {
+        inputContacts.push({
+          _: 'inputPhoneContact',
+          client_id: (i << 16 | j).toString(10),
+          phone: contacts[i].phones[j],
+          first_name: contacts[i].first_name,
+          last_name: contacts[i].last_name
+        });
+      }
+    }
+
+    return MtpApiManager.invokeApi('contacts.importContacts', {
+      contacts: inputContacts,
+      replace: false
+    }).then(function (importedContactsResult) {
+      saveApiUsers(importedContactsResult.users);
+
+      var result = [];
+      angular.forEach(importedContactsResult.imported, function (importedContact) {
+        onContactUpdated(importedContact.user_id, true);
+        result.push(importedContact.user_id);
+      });
+
+      return result;
     });
   };
 
@@ -340,6 +372,19 @@ angular.module('myApp.services', [])
       }
     }
   }
+
+  function openImportContact () {
+    return $modal.open({
+      templateUrl: 'partials/import_contact_modal.html',
+      controller: 'ImportContactModalController',
+      windowClass: 'import_contact_modal_window'
+    }).result.then(function (foundUserID) {
+      if (!foundUserID) {
+        return $q.reject();
+      }
+      return foundUserID;
+    });
+  };
 
 
   $rootScope.$on('apiUpdate', function (e, update) {
@@ -380,15 +425,91 @@ angular.module('myApp.services', [])
     saveApiUsers: saveApiUsers,
     saveApiUser: saveApiUser,
     getUser: getUser,
+    getUserInput: getUserInput,
     getUserPhoto: getUserPhoto,
     getUserString: getUserString,
     getUserSearchText: getUserSearchText,
     hasUser: hasUser,
     importContact: importContact,
+    importContacts: importContacts,
     deleteContacts: deleteContacts,
     wrapForFull: wrapForFull,
-    openUser: openUser
+    openUser: openUser,
+    openImportContact: openImportContact
   }
+})
+
+.service('PhonebookContactsService', function ($q, $modal, $sce) {
+
+  var phonebookContactsPromise;
+
+  return {
+    isAvailable: isAvailable,
+    openPhonebookImport: openPhonebookImport,
+    getPhonebookContacts: getPhonebookContacts
+  }
+
+  function isAvailable () {
+    return window.navigator && window.navigator.mozContacts && window.navigator.mozContacts.getAll;
+  }
+
+  function openPhonebookImport () {
+    return $modal.open({
+      templateUrl: 'partials/phonebook_modal.html',
+      controller: 'PhonebookModalController',
+      windowClass: 'phonebook_modal_window'
+    });
+  }
+
+  function getPhonebookContacts () {
+    if (phonebookContactsPromise) {
+      return phonebookContactsPromise;
+    }
+
+    var deferred = $q.defer(),
+        contacts = [],
+        request = window.navigator.mozContacts.getAll({}),
+        count = 0;
+
+    request.onsuccess = function () {
+      if (this.result) {
+        var contact = {
+          id: count,
+          first_name: (this.result.givenName || []).join(' '),
+          last_name: (this.result.familyName || []).join(' '),
+          phones: []
+        };
+
+        for (var i = 0; i < this.result.tel.length; i++) {
+          contact.phones.push(this.result.tel[i].value);
+        }
+        if (this.result.photo) {
+          contact.photo = URL.createObjectURL(this.result.photo[0]);
+        } else {
+          contact.photo = 'img/placeholders/UserAvatar' + ((Math.abs(count) % 8) + 1) + '@2x.png';
+        }
+        contact.photo = $sce.trustAsResourceUrl(contact.photo);
+
+        count++;
+        contacts.push(contact);
+      }
+
+      if (!this.result || count >= 1000) {
+        deferred.resolve(contacts);
+        return;
+      }
+
+      this.continue();
+    }
+
+    request.onerror = function (e) {
+      console.log('phonebook error', e, e.type, e.message);
+      deferred.reject(e);
+    }
+
+    return phonebookContactsPromise = deferred.promise;
+  }
+
 })
 
 .service('AppChatsManager', function ($rootScope, $modal, MtpApiFileManager, MtpApiManager, AppUsersManager, RichTextProcessor) {
@@ -629,7 +750,6 @@ angular.module('myApp.services', [])
   }
 
   function search (query, searchIndex) {
-    console.time('search');
     var shortIndexes = searchIndex.shortIndexes,
         fullTexts = searchIndex.fullTexts;
 
@@ -666,7 +786,6 @@ angular.module('myApp.services', [])
       }
     }
 
-    console.timeEnd('search');
     return newFoundObjs;
   }
 })
@@ -757,9 +876,7 @@ angular.module('myApp.services', [])
         }
       }
 
-      curDialogStorage.count = dialogsResult._ == 'messages.dialogsSlice'
-        ? dialogsResult.count
-        : dialogsResult.dialogs.length;
+      curDialogStorage.count = dialogsResult.count || dialogsResult.dialogs.length;
 
       curDialogStorage.dialogs.splice(offset, curDialogStorage.dialogs.length - offset);
       angular.forEach(dialogsResult.dialogs, function (dialog) {
@@ -788,21 +905,25 @@ angular.module('myApp.services', [])
     });
   }
 
-  function fillHistoryStorage (inputPeer, maxID, fullLimit, historyStorage) {
-    console.log('fill history storage', inputPeer, maxID, fullLimit, angular.copy(historyStorage));
+  function requestHistory (inputPeer, maxID, limit, offset) {
     return MtpApiManager.invokeApi('messages.getHistory', {
       peer: inputPeer,
-      offset: 0,
-      limit: fullLimit,
+      offset: offset || 0,
+      limit: limit || 0,
       max_id: maxID || 0
     }).then(function (historyResult) {
       AppUsersManager.saveApiUsers(historyResult.users);
       AppChatsManager.saveApiChats(historyResult.chats);
       saveMessages(historyResult.messages);
 
-      historyStorage.count = historyResult._ == 'messages.messagesSlice'
-        ? historyResult.count
-        : historyResult.messages.length;
+      return historyResult;
+    });
+  }
+
+  function fillHistoryStorage (inputPeer, maxID, fullLimit, historyStorage) {
+    // console.log('fill history storage', inputPeer, maxID, fullLimit, angular.copy(historyStorage));
+    return requestHistory (inputPeer, maxID, fullLimit).then(function (historyResult) {
+      historyStorage.count = historyResult.count || historyResult.messages.length;
 
       var offset = 0;
       if (maxID > 0) {
@@ -829,11 +950,13 @@ angular.module('myApp.services', [])
     });
   };
 
-  function getHistory (inputPeer, maxID, limit) {
-
+  function getHistory (inputPeer, maxID, limit, backLimit) {
     var peerID = AppPeersManager.getPeerID(inputPeer),
         historyStorage = historiesStorage[peerID],
         offset = 0,
+        offsetNotFound = false,
+        unreadOffset = false,
+        unreadSkip = false,
         resultPending = [];
 
     if (historyStorage === undefined) {
@@ -843,38 +966,77 @@ angular.module('myApp.services', [])
       resultPending = historyStorage.pending.slice();
     }
 
-    var unreadLimit = false;
     if (!limit && !maxID) {
       var foundDialog = getDialogByPeerID(peerID);
       if (foundDialog && foundDialog[0] && foundDialog[0].unread_count > 1) {
-        unreadLimit = Math.min(1000, foundDialog[0].unread_count);
-        limit = unreadLimit;
+        var unreadCount = foundDialog[0].unread_count;
+        if (unreadSkip = (unreadCount > 50)) {
+          limit = 10;
+          unreadOffset = 6;
+          offset = unreadCount - unreadOffset;
+        } else {
+          limit = Math.max(10, unreadCount + 2);
+          unreadOffset = unreadCount;
+        }
       }
     }
-
-    if (maxID > 0) {
+    else if (maxID > 0) {
+      offsetNotFound = true;
       for (offset = 0; offset < historyStorage.history.length; offset++) {
         if (maxID > historyStorage.history[offset]) {
+          offsetNotFound = false;
           break;
         }
       }
     }
 
-    if (historyStorage.count !== null && historyStorage.history.length == historyStorage.count ||
+    if (!offsetNotFound && historyStorage.count !== null && historyStorage.history.length == historyStorage.count ||
       historyStorage.history.length >= offset + (limit || 1)
     ) {
+      if (backLimit) {
+        backLimit = Math.min(offset, backLimit);
+        offset = Math.max(0, offset - backLimit);
+        limit += backLimit;
+      } else {
+        limit = limit || 20;
+      }
+
       return $q.when({
         count: historyStorage.count,
-        history: resultPending.concat(historyStorage.history.slice(offset, offset + (limit || 20))),
-        unreadLimit: unreadLimit
+        history: resultPending.concat(historyStorage.history.slice(offset, offset + limit)),
+        unreadOffset: unreadOffset,
+        unreadSkip: unreadSkip
       });
     }
 
-    if (unreadLimit) {
-      limit = Math.max(20, unreadLimit + 2);
+    if (!backLimit && !limit) {
+      limit = 20;
+    }
+    if (offsetNotFound) {
+      offset = 0;
     }
 
-    limit = limit || 20;
+    if (backLimit || unreadSkip || maxID && historyStorage.history.indexOf(maxID) == -1) {
+      if (backLimit) {
+        offset = -backLimit;
+        limit += backLimit;
+      }
+      return requestHistory(inputPeer, maxID, limit, offset).then(function (historyResult) {
+        historyStorage.count = historyResult.count || historyResult.messages.length;
+
+        var history = [];
+        angular.forEach(historyResult.messages, function (message) {
+          history.push(message.id);
+        });
+
+        return {
+          count: historyStorage.count,
+          history: resultPending.concat(history),
+          unreadOffset: unreadOffset,
+          unreadSkip: unreadSkip
+        };
+      })
+    }
 
     return fillHistoryStorage(inputPeer, maxID, limit, historyStorage).then(function () {
       offset = 0;
@@ -889,7 +1051,8 @@ angular.module('myApp.services', [])
       return {
         count: historyStorage.count,
         history: resultPending.concat(historyStorage.history.slice(offset, offset + limit)),
-        unreadLimit: unreadLimit
+        unreadOffset: unreadOffset,
+        unreadSkip: unreadSkip
       };
     });
   }
@@ -986,9 +1149,7 @@ angular.module('myApp.services', [])
       AppChatsManager.saveApiChats(searchResult.chats);
       saveMessages(searchResult.messages);
 
-      var foundCount = searchResult._ == 'messages.messagesSlice'
-        ? searchResult.count
-        : searchResult.messages.length;
+      var foundCount = searchResult.count || searchResult.messages.length;
 
       foundMsgs = [];
       angular.forEach(searchResult.messages, function (message) {
@@ -1014,18 +1175,23 @@ angular.module('myApp.services', [])
     return MtpApiManager.invokeApi('messages.deleteMessages', {
       id: messageIDs
     }).then(function (deletedMessageIDs) {
-
-      ApiUpdatesManager.saveUpdate({
-        _: 'updateDeleteMessages',
-        messages: deletedMessageIDs
+      ApiUpdatesManager.processUpdateMessage({
+        _: 'updateShort',
+        update: {
+          _: 'updateDeleteMessages',
+          messages: deletedMessageIDs
+        }
       });
-
       return deletedMessageIDs;
     });
   }
 
   function processAffectedHistory (inputPeer, affectedHistory, method) {
-    if (!ApiUpdatesManager.saveSeq(affectedHistory.seq)) {
+    if (!ApiUpdatesManager.processUpdateMessage({
+        _: 'updates',
+        seq: affectedHistory.seq,
+        updates: []
+      })) {
       return false;
     }
     if (!affectedHistory.offset) {
@@ -1070,6 +1236,10 @@ angular.module('myApp.services', [])
       }
     }
 
+    if (historyStorage.readPromise) {
+      return historyStorage.readPromise;
+    }
+
     var promise = MtpApiManager.invokeApi('messages.readHistory', {
       peer: inputPeer,
       offset: 0,
@@ -1082,6 +1252,8 @@ angular.module('myApp.services', [])
         foundDialog[0].unread_count = 0;
         $rootScope.$broadcast('dialog_unread', {peerID: peerID, count: 0});
       }
+    })['finally'](function () {
+      delete historyStorage.readPromise;
     });
 
 
@@ -1199,22 +1371,25 @@ angular.module('myApp.services', [])
           peer: inputPeer,
           message: text,
           random_id: randomID
-        }, sentRequestOptions).then(function (result) {
-          if (ApiUpdatesManager.saveSeq(result.seq)) {
-            ApiUpdatesManager.saveUpdate({
+        }, sentRequestOptions).then(function (sentMessage) {
+          message.date = sentMessage.date;
+          message.id = sentMessage.id;
+
+          ApiUpdatesManager.processUpdateMessage({
+            _: 'updates',
+            users: [],
+            chats: [],
+            seq: sentMessage.seq,
+            updates: [{
               _: 'updateMessageID',
               random_id: randomIDS,
-              id: result.id
-            });
-
-            message.date = result.date;
-            message.id = result.id;
-            ApiUpdatesManager.saveUpdate({
+              id: sentMessage.id
+            }, {
               _: 'updateNewMessage',
               message: message,
-              pts: result.pts
-            });
-          }
+              pts: sentMessage.pts
+            }]
+          });
         }, function (error) {
           toggleError(true);
         })['finally'](function () {
@@ -1341,25 +1516,26 @@ angular.module('myApp.services', [])
               peer: inputPeer,
               media: inputMedia,
               random_id: randomID
-            }).then(function (result) {
-              if (ApiUpdatesManager.saveSeq(result.seq)) {
-                ApiUpdatesManager.saveUpdate({
+            }).then(function (statedMessage) {
+              message.date = statedMessage.message.date;
+              message.id = statedMessage.message.id;
+              message.media = statedMessage.message.media;
+
+              ApiUpdatesManager.processUpdateMessage({
+                _: 'updates',
+                users: statedMessage.users,
+                chats: statedMessage.chats,
+                seq: statedMessage.seq,
+                updates: [{
                   _: 'updateMessageID',
                   random_id: randomIDS,
-                  id: result.message.id
-                });
-
-                message.date = result.message.date;
-                message.id = result.message.id;
-                message.media = result.message.media;
-
-                ApiUpdatesManager.saveUpdate({
+                  id: statedMessage.message.id
+                }, {
                   _: 'updateNewMessage',
                   message: message,
-                  pts: result.pts
-                });
-              }
-
+                  pts: statedMessage.pts
+                }]
+              });
             }, function (error) {
               toggleError(true);
             });
@@ -1415,6 +1591,10 @@ angular.module('myApp.services', [])
         case 'inputMediaContact':
           media = angular.extend({}, inputMedia, {_: 'messageMediaContact'});
           break;
+
+        case 'inputMediaPhoto':
+          media = {photo: AppPhotosManager.getPhoto(inputMedia.id.id)};
+          break;
       }
 
       var message = {
@@ -1451,24 +1631,26 @@ angular.module('myApp.services', [])
           peer: inputPeer,
           media: inputMedia,
           random_id: randomID
-        }).then(function (result) {
-          if (ApiUpdatesManager.saveSeq(result.seq)) {
-            ApiUpdatesManager.saveUpdate({
+        }).then(function (statedMessage) {
+          message.date = statedMessage.message.date;
+          message.id = statedMessage.message.id;
+          message.media = statedMessage.message.media;
+
+          ApiUpdatesManager.processUpdateMessage({
+            _: 'updates',
+            users: statedMessage.users,
+            chats: statedMessage.chats,
+            seq: statedMessage.seq,
+            updates: [{
               _: 'updateMessageID',
               random_id: randomIDS,
-              id: result.message.id
-            });
-
-            message.date = result.message.date;
-            message.id = result.message.id;
-            message.media = result.message.media;
-
-            ApiUpdatesManager.saveUpdate({
+              id: statedMessage.message.id
+            }, {
               _: 'updateNewMessage',
               message: message,
-              pts: result.pts
-            });
-          }
+              pts: statedMessage.pts
+            }]
+          });
         }, function (error) {
           toggleError(true);
         });
@@ -1490,22 +1672,23 @@ angular.module('myApp.services', [])
     return MtpApiManager.invokeApi('messages.forwardMessages', {
       peer: AppPeersManager.getInputPeerByID(peerID),
       id: msgIDs
-    }).then(function (forwardResult) {
-      AppUsersManager.saveApiUsers(forwardResult.users);
-      AppChatsManager.saveApiChats(forwardResult.chats);
-
-      if (ApiUpdatesManager.saveSeq(forwardResult.seq)) {
-        angular.forEach(forwardResult.messages, function(apiMessage) {
-
-          ApiUpdatesManager.saveUpdate({
-            _: 'updateNewMessage',
-            message: apiMessage,
-            pts: forwardResult.pts
-          });
-
+    }).then(function (statedMessages) {
+      var updates = [];
+      angular.forEach(statedMessages.messages, function(apiMessage) {
+        updates.push({
+          _: 'updateNewMessage',
+          message: apiMessage,
+          pts: statedMessages.pts
         });
-      }
+      });
 
+      ApiUpdatesManager.processUpdateMessage({
+        _: 'updates',
+        users: statedMessages.users,
+        chats: statedMessages.chats,
+        seq: statedMessages.seq,
+        updates: updates
+      });
     });
   };
 
@@ -1520,9 +1703,12 @@ angular.module('myApp.services', [])
           historyStorage = historiesStorage[peerID],
           i;
 
-      ApiUpdatesManager.saveUpdate({
-        _: 'updateDeleteMessages',
-        messages: [tempID]
+      ApiUpdatesManager.processUpdateMessage({
+        _: 'updateShort',
+        update: {
+          _: 'updateDeleteMessages',
+          messages: [tempID]
+        }
       });
 
       for (i = 0; i < historyStorage.pending.length; i++) {
@@ -1988,7 +2174,7 @@ angular.module('myApp.services', [])
   }
 })
 
-.service('AppPhotosManager', function ($modal, $window, $timeout, $rootScope, MtpApiFileManager, AppUsersManager) {
+.service('AppPhotosManager', function ($modal, $window, $timeout, $rootScope, MtpApiManager, MtpApiFileManager, AppUsersManager) {
   var photos = {};
 
   function savePhoto (apiPhoto) {
@@ -2022,6 +2208,56 @@ angular.module('myApp.services', [])
     return bestPhotoSize;
   }
 
+  function getUserPhotos (inputUser, maxID, limit) {
+    return MtpApiManager.invokeApi('photos.getUserPhotos', {
+      user_id: inputUser,
+      offset: 0,
+      limit: limit || 20,
+      max_id: maxID || 0
+    }).then(function (photosResult) {
+      AppUsersManager.saveApiUsers(photosResult.users);
+      var photoIDs = [];
+      for (var i = 0; i < photosResult.photos.length; i++) {
+        savePhoto(photosResult.photos[i]);
+        photoIDs.push(photosResult.photos[i].id)
+      }
+
+      return {
+        count: photosResult.count || photosResult.photos.length,
+        photos: photoIDs
+      };
+    });
+  }
+
+  function preloadPhoto (photoID) {
+    if (!photos[photoID]) {
+      return;
+    }
+    var photo = photos[photoID],
+        fullWidth = $(window).width() - 36,
+        fullHeight = $($window).height() - 150,
+        fullPhotoSize = choosePhotoSize(photo, fullWidth, fullHeight);
+
+    if (fullPhotoSize && !fullPhotoSize.preloaded) {
+      fullPhotoSize.preloaded = true;
+      if (fullPhotoSize.size) {
+        MtpApiFileManager.downloadFile(fullPhotoSize.location.dc_id, {
+          _: 'inputFileLocation',
+          volume_id: fullPhotoSize.location.volume_id,
+          local_id: fullPhotoSize.location.local_id,
+          secret: fullPhotoSize.location.secret
+        }, fullPhotoSize.size);
+      } else {
+        MtpApiFileManager.downloadSmallFile(fullPhotoSize.location);
+      }
+    }
+  };
+  $rootScope.preloadPhoto = preloadPhoto;
+
+  function getPhoto (photoID) {
+    return photos[photoID] || {_: 'photoEmpty'};
+  }
+
   function wrapForHistory (photoID) {
     var photo = angular.copy(photos[photoID]) || {_: 'photoEmpty'},
         width = 260,
@@ -2052,31 +2288,6 @@ angular.module('myApp.services', [])
 
     return photo;
   }
-
-  function preloadPhoto (photoID) {
-    if (!photos[photoID]) {
-      return;
-    }
-    var photo = photos[photoID],
-        fullWidth = $(window).width() - 36,
-        fullHeight = $($window).height() - 150,
-        fullPhotoSize = choosePhotoSize(photo, fullWidth, fullHeight);
-
-    if (fullPhotoSize && !fullPhotoSize.preloaded) {
-      fullPhotoSize.preloaded = true;
-      if (fullPhotoSize.size) {
-        MtpApiFileManager.downloadFile(fullPhotoSize.location.dc_id, {
-          _: 'inputFileLocation',
-          volume_id: fullPhotoSize.location.volume_id,
-          local_id: fullPhotoSize.location.local_id,
-          secret: fullPhotoSize.location.secret
-        }, fullPhotoSize.size);
-      } else {
-        MtpApiFileManager.downloadSmallFile(fullPhotoSize.location);
-      }
-    }
-  };
-  $rootScope.preloadPhoto = preloadPhoto;
 
   function wrapForFull (photoID) {
     var photo = wrapForHistory(photoID),
@@ -2123,14 +2334,23 @@ angular.module('myApp.services', [])
     return photo;
   }
 
-  function openPhoto (photoID, messageID) {
+  function openPhoto (photoID, peerListID) {
+    if (!photoID || photoID === '0') {
+      return false;
+    }
+
     var scope = $rootScope.$new(true);
+
     scope.photoID = photoID;
-    scope.messageID = messageID;
+    if (peerListID < 0) {
+      scope.userID = -peerListID;
+    } else{
+      scope.messageID = peerListID;
+    }
 
     var modalInstance = $modal.open({
       templateUrl: 'partials/photo_modal.html',
-      controller: 'PhotoModalController',
+      controller: scope.userID ? 'UserpicModalController' : 'PhotoModalController',
       scope: scope,
       windowClass: 'photo_modal_window'
     });
@@ -2201,6 +2421,8 @@ angular.module('myApp.services', [])
   return {
     savePhoto: savePhoto,
     preloadPhoto: preloadPhoto,
+    getUserPhotos: getUserPhotos,
+    getPhoto: getPhoto,
     wrapForHistory: wrapForHistory,
     wrapForFull: wrapForFull,
     openPhoto: openPhoto,
@@ -2505,6 +2727,7 @@ angular.module('myApp.services', [])
         switch (action) {
           case 1:
             window.open(url, '_blank');
+            break;
 
           default:
             var a = $('<a>Download</a>')
@@ -2624,15 +2847,32 @@ angular.module('myApp.services', [])
 
 .service('ApiUpdatesManager', function ($rootScope, MtpNetworkerFactory, AppUsersManager, AppChatsManager, AppPeersManager, MtpApiManager) {
 
-  var curState = {invalid: true};
+  var isSynchronizing = true,
+      getDifferencePending = false,
+      curState = {},
+      pendingUpdates = {};
+
+  function popPendingUpdate () {
+    var nextSeq = curState.seq + 1,
+        updateMessage = pendingUpdates[nextSeq];
+    if (updateMessage) {
+      console.log(dT(), 'pop pending update', nextSeq, updateMessage);
+      if (processUpdateMessage(updateMessage)) {
+        delete pendingUpdates[nextSeq];
+      }
+    }
+  }
+
+  function forceGetDifference () {
+    if (!isSynchronizing) {
+      getDifference();
+    }
+  }
 
   function processUpdateMessage (updateMessage) {
-    if (curState.invalid) {
-      return false;
-    }
-
     if (updateMessage.seq) {
       if (!saveSeq(updateMessage.seq, updateMessage.seq_start)) {
+        pendingUpdates[updateMessage.seq_start || updateMessage.seq] = updateMessage;
         return false;
       }
       if (updateMessage.date) {
@@ -2643,47 +2883,18 @@ angular.module('myApp.services', [])
 
     switch (updateMessage._) {
       case 'updatesTooLong':
-        getDifference();
+        forceGetDifference();
         break;
 
       case 'updateShort':
         saveUpdate(updateMessage.update);
         break;
 
-      case 'updatesCombined':
-      case 'updates':
-        AppUsersManager.saveApiUsers(updateMessage.users);
-        AppChatsManager.saveApiChats(updateMessage.chats);
-
-        var i, update, message;
-        for (var i = 0; i < updateMessage.updates.length; i++) {
-          update = updateMessage.updates[i];
-          switch (update._) {
-            case 'updateNewMessage':
-              message = update.message;
-              if (message.from_id && !AppUsersManager.hasUser(message.from_id)) {
-                console.log('User not found', message.from_id, 'getDiff');
-                getDifference();
-                return false;
-              }
-              if (message.to_id.chat_id && !AppChatsManager.hasChat(message.to_id.chat_id)) {
-                console.log('Chat not found', message.to_id.chat_id, 'getDiff');
-                getDifference();
-                return false;
-              }
-              break;
-          }
-        }
-
-        angular.forEach(updateMessage.updates, function (update) {
-          saveUpdate(update);
-        });
-        break;
 
       case 'updateShortMessage':
         if (!AppUsersManager.hasUser(updateMessage.from_id)) {
           console.log('User not found', updateMessage.from_id, 'getDiff');
-          getDifference();
+          forceGetDifference();
           break;
         }
         saveUpdate({
@@ -2707,7 +2918,7 @@ angular.module('myApp.services', [])
         if (!AppUsersManager.hasUser(updateMessage.from_id) ||
             !AppChatsManager.hasChat(updateMessage.chat_id)) {
           console.log('User or chat not found', updateMessage.from_id, updateMessage.chat_id, 'getDiff');
-          getDifference();
+          forceGetDifference();
           break;
         }
         saveUpdate({
@@ -2726,22 +2937,65 @@ angular.module('myApp.services', [])
           pts: updateMessage.pts
         });
         break;
+
+      case 'updatesCombined':
+      case 'updates':
+      default:
+        AppUsersManager.saveApiUsers(updateMessage.users);
+        AppChatsManager.saveApiChats(updateMessage.chats);
+
+        var i, update, message;
+        for (var i = 0; i < updateMessage.updates.length; i++) {
+          update = updateMessage.updates[i];
+          switch (update._) {
+            case 'updateNewMessage':
+              message = update.message;
+              if (message.from_id && !AppUsersManager.hasUser(message.from_id)) {
+                console.log('User not found', message.from_id, 'getDiff');
+                forceGetDifference();
+                return false;
+              }
+              if (message.to_id.chat_id && !AppChatsManager.hasChat(message.to_id.chat_id)) {
+                console.log('Chat not found', message.to_id.chat_id, 'getDiff');
+                forceGetDifference();
+                return false;
+              }
+              break;
+          }
+        }
+
+        angular.forEach(updateMessage.updates, function (update) {
+          saveUpdate(update);
+        });
+        break;
+    }
+
+    popPendingUpdate();
+
+    if (getDifferencePending && curState.seq >= getDifferencePending.seqAwaiting) {
+      console.log(dT(), 'cancel pending getDiff', getDifferencePending.seqAwaiting);
+      clearTimeout(getDifferencePending.timeout);
+      getDifferencePending = false;
     }
 
     return true;
   }
 
-  function getDifference (force) {
-    if (curState.invalid && !force) {
-      return false;
+  function getDifference () {
+    isSynchronizing = true;
+
+    if (getDifferencePending) {
+      clearTimeout(getDifferencePending.timeout);
+      getDifferencePending = false;
     }
 
-    curState.invalid = true;
     MtpApiManager.invokeApi('updates.getDifference', {pts: curState.pts, date: curState.date, qts: 0}).then(function (differenceResult) {
       if (differenceResult._ == 'updates.differenceEmpty') {
+        console.log(dT(), 'apply empty diff', differenceResult.seq);
         curState.date = differenceResult.date;
         curState.seq = differenceResult.seq;
-        delete curState.invalid;
+        isSynchronizing = false;
+        popPendingUpdate();
         return false;
       }
 
@@ -2750,7 +3004,7 @@ angular.module('myApp.services', [])
 
       // Should be first because of updateMessageID
       angular.forEach(differenceResult.other_updates, function(update){
-        saveUpdate(update, true);
+        saveUpdate(update);
       });
 
       angular.forEach(differenceResult.new_messages, function (apiMessage) {
@@ -2758,7 +3012,7 @@ angular.module('myApp.services', [])
           _: 'updateNewMessage',
           message: apiMessage,
           pts: curState.pts
-        }, true);
+        });
       });
 
       var nextState = differenceResult.intermediate_state || differenceResult.state;
@@ -2766,18 +3020,17 @@ angular.module('myApp.services', [])
       curState.pts = nextState.pts;
       curState.date = nextState.date;
 
+      console.log(dT(), 'apply diff', curState.seq, curState.pts);
+
       if (differenceResult._ == 'updates.differenceSlice') {
         getDifference(true);
       } else {
-        delete curState.invalid;
+        isSynchronizing = false;
       }
     });
   }
 
-  function saveUpdate (update, force) {
-    if (curState.invalid && !force) {
-      return false;
-    }
+  function saveUpdate (update) {
     if (update.pts) {
       curState.pts = update.pts;
     }
@@ -2785,25 +3038,35 @@ angular.module('myApp.services', [])
     $rootScope.$broadcast('apiUpdate', update);
   }
 
+
+
   function saveSeq (seq, seqStart) {
-    // console.log('saving seq', curState.invalid, seq, seqStart, curState.seq);
-
-    if (curState.invalid) {
-      return false;
-    }
-
     seqStart = seqStart || seq;
 
     if (!seqStart) {
       return true;
     }
 
+    if (isSynchronizing) {
+      console.log(dT(), 'Seq decline', seqStart);
+      return false;
+    }
+
     if (seqStart != curState.seq + 1) {
       if (seqStart > curState.seq) {
-        console.warn('Seq hole', seqStart, curState.seq);
-        getDifference();
+        console.warn(dT(), 'Seq hole', seqStart, getDifferencePending && getDifferencePending.seqAwaiting);
+        if (!getDifferencePending) {
+          getDifferencePending = {
+            seqAwaiting: seqStart,
+            timeout: setTimeout(function () {
+              getDifference();
+            }, 5000)
+          };
+        }
       }
       return false;
+    } else {
+      console.log(dT(), 'Seq apply', seqStart);
     }
 
     curState.seq = seq;
@@ -2817,14 +3080,13 @@ angular.module('myApp.services', [])
       curState.seq = stateResult.seq;
       curState.pts = stateResult.pts;
       curState.date = stateResult.date;
-      delete curState.invalid;
+      isSynchronizing = false;
     })
   }
 
 
   return {
-    saveUpdate: saveUpdate,
-    saveSeq: saveSeq,
+    processUpdateMessage: processUpdateMessage,
     attach: attach
   }
 })
@@ -2967,9 +3229,10 @@ angular.module('myApp.services', [])
           videoID = youtubeMatches && youtubeMatches[1];
 
       if (videoID) {
-        text = text + '<div class="im_message_iframe_video"><iframe type="text/html" frameborder="0" ' +
+        var tag = Config.Modes.chrome_packed ? 'webview' : 'iframe';
+        text = text + '<div class="im_message_iframe_video"><' + tag + ' type="text/html" frameborder="0" ' +
               'src="http://www.youtube.com/embed/' + videoID +
-              '?autoplay=0&amp;controls=2"></iframe></div>'
+              '?autoplay=0&amp;controls=2"></' + tag + '></div>'
       }
     }
 
@@ -3402,5 +3665,71 @@ angular.module('myApp.services', [])
     selectContact: function (options) {
       return select (false, options);
     },
+  }
+})
+
+
+.service('ChangelogNotifyService', function (AppConfigManager, $rootScope, $http, $modal) {
+
+  function versionCompare (ver1, ver2) {
+    if (typeof ver1 !== 'string') {
+      ver1 = '';
+    }
+    if (typeof ver2 !== 'string') {
+      ver2 = '';
+    }
+    // console.log('ss', ver1, ver2);
+    ver1 = ver1.replace(/^\s+|\s+$/g, '').split('.');
+    ver2 = ver2.replace(/^\s+|\s+$/g, '').split('.');
+
+    var a = Math.max(ver1.length, ver2.length), i;
+
+    for (i = 0; i < a; i++) {
+      if (ver1[i] == ver2[i]) {
+        continue;
+      }
+      if (ver1[i] > ver2[i]) {
+        return 1;
+      } else {
+        return -1;
+      }
+    }
+
+    return 0;
+  }
+
+  function checkUpdate () {
+    AppConfigManager.get('last_version').then(function (lastVersion) {
+      if (lastVersion != Config.App.version) {
+        if (lastVersion) {
+          showChangelog(lastVersion);
+        }
+        AppConfigManager.set({last_version: Config.App.version});
+      }
+    })
+  }
+
+  function showChangelog (lastVersion) {
+    var $scope = $rootScope.$new();
+
+    $scope.lastVersion = lastVersion;
+    $scope.canShowVersion = function (curVersion) {
+      if ($scope.lastVersion === false || $scope.lastVersion === undefined) {
+        return true;
+      }
+
+      return versionCompare(curVersion, lastVersion) > 0;
+    };
+
+    $modal.open({
+      templateUrl: 'partials/changelog_modal.html',
+      scope: $scope,
+      windowClass: 'changelog_modal_window'
+    });
+  }
+
+  return {
+    checkUpdate: checkUpdate,
+    showChangelog: showChangelog
   }
 })

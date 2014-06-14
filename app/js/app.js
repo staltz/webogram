@@ -1,5 +1,5 @@
 /*!
- * Webogram v0.1.2 - messaging web application for MTProto
+ * Webogram v0.1.6 - messaging web application for MTProto
  * https://github.com/zhukov/webogram
  * Copyright (C) 2014 Igor Zhukov <igor.beatle@gmail.com>
  * https://github.com/zhukov/webogram/blob/master/LICENSE
@@ -7,16 +7,9 @@
 
 'use strict';
 
-window._testMode = location.search.indexOf('test=1') > 0;
-window._debugMode = location.search.indexOf('debug=1') > 0;
-window._osX = (navigator.platform || '').toLowerCase().indexOf('mac') != -1 ||
-              (navigator.userAgent || '').toLowerCase().indexOf('mac') != -1;
-window._retina = window.devicePixelRatio > 1;
-
-if (!window._osX) {
-  $('body').addClass('non_osx');
-}
-$('body').addClass(window._retina ? 'is_2x' : 'is_1x');
+$(document.body)
+  .addClass(Config.Navigator.osX ? 'osx' : 'non_osx')
+  .addClass(Config.Navigator.retina ? 'is_2x' : 'is_1x');
 
 $(window).on('load', function () {
   setTimeout(function () {
