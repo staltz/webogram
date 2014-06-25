@@ -56,13 +56,13 @@
 
     </div>
 
-    <div bindonce bo-if="historyMessage._ != 'messageService'" class="im_content_message_wrap">
+    <div bindonce bo-if="historyMessage._ != 'messageService'" class="im_content_message_wrap" ng-class="{im_message_unread: historyMessage.unread, im_message_out: historyMessage.out, im_message_error: historyMessage.error, im_message_pending: historyMessage.pending, im_message_fwd: historyMessage._ == 'messageForwarded'}">
       <div class="im_content_message_select_area">
         <i class="icon icon-select-tick"></i>
       </div>
 
-      <a bo-if="historyMessage.pending || historyMessage.error" ng-click="historyMessage.send()" ng-show="historyMessage.error">
-        <i class="icon-message-status icon-message-status-error" tooltip="Try again"></i>
+      <a class="im_message_error_btn" bo-if="historyMessage.pending || historyMessage.error" ng-click="historyMessage.send()">
+        <i class="icon-message-status" tooltip="Try again"></i>
       </a>
 
       <i bo-if="historyMessage.unread || historyMessage.pending" class="icon-message-status" ng-class="{'icon-message-status-unread': historyMessage.unread, 'icon-message-status-pending': historyMessage.pending}" ng-show="!historyMessage.error"></i>
@@ -75,6 +75,7 @@
         />
       </a>
       <div class="im_message_meta pull-right text-right">
+        <i class="icon-message-status-tick"></i>
         <span class="im_message_date" bo-bind="historyMessage.date | dateOrTime"></span>
       </div>
 
@@ -83,8 +84,18 @@
         <a bo-if="historyMessage.to_id.chat_id > 0" class="im_message_author" bo-class="'user_color_' + historyMessage.fromPhoto.num" ng-click="openUser(historyMessage.from_id)" ng-bind-html="historyMessage.fromUser.rFullName"></a>
         <a bo-if="!historyMessage.to_id.chat_id" class="im_message_author" ng-click="openUser(historyMessage.from_id)" ng-bind-html="historyMessage.fromUser.rFirstName" ></a>
 
-        <div bo-if="historyMessage._ == 'messageForwarded'" class="im_message_fwd_header">
-          Forwarded message from <a class="im_message_fwd_author" ng-click="openUser(historyMessage.fwd_from_id)" ng-bind-html="historyMessage.fwdUser.rFirstName"></a>, <span class="im_message_fwd_date" ng-bind="historyMessage.fwd_date | dateOrTime"></span>
+
+        <div bo-if="historyMessage._ == 'messageForwarded'" class="im_message_fwd_from">
+          <a ng-click="openUser(historyMessage.fwd_from_id)" class="im_message_fwd_photo pull-left">
+            <img
+              class="im_message_fwd_photo"
+              my-load-thumb
+              thumb="historyMessage.fwdPhoto"
+            />
+          </a>
+          <div class="im_message_fwd_author_wrap">
+            <a class="im_message_fwd_author" ng-click="openUser(historyMessage.fwd_from_id)" ng-bind-html="historyMessage.fwdUser.rFirstName"></a><span class="im_message_fwd_date" ng-bind="historyMessage.fwd_date | dateOrTime"></span>
+          </div>
         </div>
 
         <div bo-if="historyMessage.media &amp;&amp; historyMessage.media._ != 'messageMediaEmpty'" class="im_message_media" ng-switch="historyMessage.media._">

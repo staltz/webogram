@@ -10,9 +10,19 @@
   <link rel="stylesheet" href="vendor/bootstrap/css/bootstrap.css"/>
   <link rel="stylesheet" href="vendor/jquery.nanoscroller/nanoscroller.css"/>
   <link rel="stylesheet" href="css/app.css"/>
+  <link rel="stylesheet" href="css/app_mobile.css"/>
   <!-- endbuild -->
 
   <link rel="icon" href="favicon.ico" type="image/x-icon" />
+
+  <link rel="apple-touch-icon" href="img/icons/icon90.png">
+  <link rel="apple-touch-icon" sizes="90x90" href="img/icons/icon90.png">
+  <link rel="apple-touch-icon" sizes="120x120" href="img/icons/icon120.png">
+
+  <meta name="apple-mobile-web-app-title" content="Webogram">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 
   <meta property="og:title" content="Webogram">
   <meta property="og:url" content="http://zhukov.github.io/webogram/">
@@ -23,7 +33,7 @@
 </head>
 <body>
 
-  <div ng-view></div>
+  <div class="page_wrap" ng-view></div>
 
   <!-- build:js js/app.js -->
   <script type="text/javascript" src="vendor/console-polyfill/console-polyfill.js"></script>
@@ -46,8 +56,12 @@
   <script type="text/javascript" src="vendor/closure/long.js"></script>
 
 
+  <script type="text/javascript" src="js/lib/utils.js"></script>
+  <script type="text/javascript" src="js/lib/bin_utils.js"></script>
+  <script type="text/javascript" src="js/lib/tl_utils.js"></script>
+  <script type="text/javascript" src="js/lib/ng_utils.js"></script>
   <script type="text/javascript" src="js/lib/mtproto.js"></script>
-  <script type="text/javascript" src="js/util.js"></script>
+  <script type="text/javascript" src="js/lib/mtproto_wrapper.js"></script>
 
   <script type="text/javascript" src="js/app.js"></script>
   <script type="text/javascript" src="js/services.js"></script>

@@ -1,5 +1,5 @@
 /*!
- * Webogram v0.1.6 - messaging web application for MTProto
+ * Webogram v0.1.7 - messaging web application for MTProto
  * https://github.com/zhukov/webogram
  * Copyright (C) 2014 Igor Zhukov <igor.beatle@gmail.com>
  * https://github.com/zhukov/webogram/blob/master/LICENSE
@@ -11,6 +11,15 @@
 
 
 angular.module('myApp.directives', ['myApp.filters'])
+
+  .directive('myHead', function() {
+    return {
+      restrict: 'AE',
+      scope: true,
+      templateUrl: 'partials/head.html'
+    };
+  })
+
   .directive('myDialog', function() {
     return {
       restrict: 'AE',
@@ -236,7 +245,8 @@ angular.module('myApp.directives', ['myApp.filters'])
       function updateSizes () {
         if (attrs.modal) {
           $(element).css({
-            height: $($window).height() - 200
+            height: $($window).height() -
+                    (Config.Navigator.mobile ? 100 : 200)
           });
           updateScroller();
           return;
@@ -281,7 +291,10 @@ angular.module('myApp.directives', ['myApp.filters'])
 
       function updateSizes () {
         $(element).css({
-          height: $($window).height() - (panelWrap && panelWrap.offsetHeight || 0) - (searchWrap && searchWrap.offsetHeight || 0) - 200
+          height: $($window).height() -
+                  (panelWrap && panelWrap.offsetHeight || 0) -
+                  (searchWrap && searchWrap.offsetHeight || 0) -
+                  (Config.Navigator.mobile ? 100 : 200)
         });
         $(contactsWrap).nanoScroller();
       }
@@ -325,7 +338,7 @@ angular.module('myApp.directives', ['myApp.filters'])
 
   })
 
-  .directive('myHistory', function ($window, $timeout, $transition) {
+  .directive('myHistory', function ($window, $timeout, $rootScope, $transition) {
 
     return {
       link: link
@@ -377,14 +390,17 @@ angular.module('myApp.directives', ['myApp.filters'])
         if (!atBottom && !options.my) {
           return;
         }
-        if (!animated) {
+        var curAnimated = animated && !$rootScope.idle.isIDLE,
+            wasH;
+        if (!curAnimated) {
           $(scrollable).css({bottom: 0});
           $(scrollableWrap).addClass('im_history_to_bottom');
+        } else {
+          wasH = scrollableWrap.scrollHeight;
         }
 
-        var wasH = scrollableWrap.scrollHeight;
         onContentLoaded(function () {
-          if (animated) {
+          if (curAnimated) {
             curAnimation = true;
             $(historyMessagesEl).removeClass('im_history_appending');
             scrollableWrap.scrollTop = scrollableWrap.scrollHeight;
@@ -593,7 +609,7 @@ angular.module('myApp.directives', ['myApp.filters'])
 
   })
 
-  .directive('mySendForm', function ($timeout, $modalStack, AppConfigManager, ErrorService) {
+  .directive('mySendForm', function ($timeout, $modalStack, Storage, ErrorService) {
 
     return {
       link: link,
@@ -611,6 +627,7 @@ angular.module('myApp.directives', ['myApp.filters'])
           dragStarted, dragTimeout,
           emojiArea = $(messageField).emojiarea({button: emojiButton, norealTime: true}),
           emojiMenu = $('.emoji-menu', element)[0],
+          submitBtn = $('.im_submit', element)[0],
           richTextarea = $('.emoji-wysiwyg-editor', element)[0];
 
       if (richTextarea) {
@@ -619,32 +636,39 @@ angular.module('myApp.directives', ['myApp.filters'])
         $(richTextarea).attr('placeholder', $(messageField).attr('placeholder'));
 
         var updatePromise;
-        $(richTextarea).on('keyup', function (e) {
-          updateHeight();
+        $(richTextarea)
+          .on('DOMNodeInserted', onPastedImageEvent)
+          .on('keyup', function (e) {
+            updateHeight();
 
-          $scope.draftMessage.text = richTextarea.innerText;
+            $scope.draftMessage.text = richTextarea.innerText;
 
-          $timeout.cancel(updatePromise);
-          updatePromise = $timeout(updateValue, 1000);
-        });
+            $timeout.cancel(updatePromise);
+            updatePromise = $timeout(updateValue, 1000);
+          });
       }
 
-      fileSelects.on('change', function () {
-        var self = this;
-        $scope.$apply(function () {
-          $scope.draftMessage.files = Array.prototype.slice.call(self.files);
-          $scope.draftMessage.isMedia = $(self).hasClass('im_media_attach_input');
-          setTimeout(function () {
-            try {
-              self.value = '';
-            } catch (e) {};
-          }, 1000);
-        });
-      });
+      // Head is sometimes slower
+      $timeout(function () {
+        fileSelects
+          .add('.im_head_attach input')
+          .on('change', function () {
+            var self = this;
+            $scope.$apply(function () {
+              $scope.draftMessage.files = Array.prototype.slice.call(self.files);
+              $scope.draftMessage.isMedia = $(self).hasClass('im_media_attach_input');
+              setTimeout(function () {
+                try {
+                  self.value = '';
+                } catch (e) {};
+              }, 1000);
+            });
+          });
+      }, 1000);
 
       var sendOnEnter = true,
           updateSendSettings = function () {
-            AppConfigManager.get('send_ctrlenter').then(function (sendOnCtrl) {
+            Storage.get('send_ctrlenter').then(function (sendOnCtrl) {
               sendOnEnter = !sendOnCtrl;
             });
           };
@@ -675,7 +699,7 @@ angular.module('myApp.directives', ['myApp.filters'])
 
       });
 
-      $('.im_submit', element).on('mousedown', function (e) {
+      $(submitBtn).on('mousedown', function (e) {
         $(element).trigger('submit');
         $(element).trigger('message_send');
         resetAfterSubmit();
@@ -736,11 +760,8 @@ angular.module('myApp.directives', ['myApp.filters'])
 
       $('body').on('dragenter dragleave dragover drop', onDragDropEvent);
       $(document).on('paste', onPasteEvent);
-      if (richTextarea) {
-        $(richTextarea).on('DOMNodeInserted', onPastedImageEvent);
-      }
 
-      if (!Config.Navigator.mobile) {
+      if (!Config.Navigator.touch) {
         $scope.$on('ui_peer_change', focusField);
         $scope.$on('ui_history_focus', focusField);
         $scope.$on('ui_history_change', focusField);
@@ -750,20 +771,6 @@ angular.module('myApp.directives', ['myApp.filters'])
 
       $scope.$on('ui_peer_draft', updateField);
       $scope.$on('ui_message_before_send', updateValue);
-
-
-      $scope.$on('$destroy', function cleanup() {
-        $('body').off('dragenter dragleave dragover drop', onDragDropEvent);
-        $(document).off('paste', onPasteEvent);
-        $(document).off('keydown', onKeyDown);
-        if (richTextarea) {
-          $(richTextarea).off('DOMNodeInserted', onPastedImageEvent);
-        }
-      });
-
-      if (!Config.Navigator.mobile) {
-        focusField();
-      }
 
       function focusField () {
         onContentLoaded(function () {
@@ -851,8 +858,25 @@ angular.module('myApp.directives', ['myApp.filters'])
 
         return cancelEvent(e);
       };
-    }
 
+
+      $scope.$on('$destroy', function cleanup() {
+        $('body').off('dragenter dragleave dragover drop', onDragDropEvent);
+        $(document).off('paste', onPasteEvent);
+        $(document).off('keydown', onKeyDown);
+        $(submitBtn).off('mousedown')
+        fileSelects.off('change');
+        if (richTextarea) {
+          $(richTextarea).off('DOMNodeInserted keyup', onPastedImageEvent);
+        }
+        $(editorElement).off('keydown');
+      });
+
+      if (!Config.Navigator.touch) {
+        focusField();
+      }
+
+    }
   })
 
   .directive('myLoadThumb', function(MtpApiFileManager) {
@@ -1221,7 +1245,7 @@ angular.module('myApp.directives', ['myApp.filters'])
   .directive('myFocused', function(){
     return {
       link: function($scope, element, attrs) {
-        if (Config.Navigator.mobile) {
+        if (Config.Navigator.touch) {
           return false;
         }
         setTimeout(function () {
@@ -1235,7 +1259,7 @@ angular.module('myApp.directives', ['myApp.filters'])
     return {
       link: function($scope, element, attrs) {
         $scope.$on(attrs.myFocusOn, function () {
-          if (Config.Navigator.mobile) {
+          if (Config.Navigator.touch) {
             return false;
           }
           onContentLoaded(function () {
@@ -1276,7 +1300,7 @@ angular.module('myApp.directives', ['myApp.filters'])
 
     function link($scope, element, attrs) {
       attrs.$observe('myModalWidth', function (newW) {
-        $(element[0].parentNode.parentNode).css({width: parseInt(newW) + 36});
+        $(element[0].parentNode.parentNode).css({width: parseInt(newW) + (Config.Navigator.mobile ? 0 : 36)});
       });
     };
 
@@ -1379,6 +1403,10 @@ angular.module('myApp.directives', ['myApp.filters'])
     function link($scope, element, attrs) {
 
       var updateMargin = function () {
+        if (Config.Navigator.mobile &&
+            $(element[0].parentNode.parentNode.parentNode).hasClass('page_modal')) {
+          return;
+        }
         var height = element[0].parentNode.offsetHeight,
             contHeight = element[0].parentNode.parentNode.parentNode.offsetHeight;
 
@@ -1416,15 +1444,21 @@ angular.module('myApp.directives', ['myApp.filters'])
 
     function link($scope, element, attrs) {
 
-      var prevMargin = false;
+      var usePadding = attrs.padding === 'true',
+          prevMargin = 0;
 
       var updateMargin = function () {
         var height = element[0].offsetHeight,
+            fullHeight = height - (height && usePadding ? 2 * prevMargin : 0),
             contHeight = $($window).height(),
             ratio = attrs.myVerticalPosition && parseFloat(attrs.myVerticalPosition) || 0.5,
-            margin = height < contHeight ? parseInt((contHeight - height) * ratio) : '';
+            margin = fullHeight < contHeight ? parseInt((contHeight - fullHeight) * ratio) : '',
+            styles = usePadding
+              ? {paddingTop: margin, paddingBottom: margin}
+              : {marginTop: margin, marginBottom: margin};
 
-        element.css({marginTop: margin, marginBottom: margin});
+        element.css(styles);
+        element.addClass('vertical-aligned');
 
         if (prevMargin !== margin) {
           $scope.$emit('ui_height');
